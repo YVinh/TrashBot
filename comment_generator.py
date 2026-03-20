@@ -18,9 +18,8 @@ def load_image_as_base64(image_path: str) -> str:
                 heif_file.size,
                 heif_file.data
             )
-        except Exception:
-            # Fallback: try to open normally
-            image = Image.open(image_path)
+        except Exception as e:
+            raise ValueError(f"Cannot open HEIC file: {str(e)}. Try converting to JPEG first using Preview or ImageMagick.")
     else:
         image = Image.open(image_path)
 
