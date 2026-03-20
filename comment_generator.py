@@ -30,7 +30,11 @@ def generate_sassy_comment(image_path: str) -> str:
     Returns:
         A witty, sassy comment about the trash in the image
     """
-    client = Anthropic()
+    api_key = os.getenv("CLAUDE_API_KEY")
+    if not api_key:
+        raise ValueError("CLAUDE_API_KEY not found in environment variables. Check your .env file.")
+
+    client = Anthropic(api_key=api_key)
 
     # Validate image exists
     if not os.path.exists(image_path):
@@ -47,7 +51,7 @@ def generate_sassy_comment(image_path: str) -> str:
 
     # Create message with vision capability
     message = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
+        model="claude-opus-4-6",
         max_tokens=280,  # Leave room for X's character count
         messages=[
             {

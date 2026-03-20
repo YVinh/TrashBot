@@ -7,6 +7,7 @@ An AI-powered bot that posts images of trash to X (Twitter) with sassy, witty co
 ✨ **AI-Generated Comments** - Uses Claude's vision API to analyze trash images and create contextual, sassy comments
 📱 **Easy to Use** - Simple CLI: `python post_trash.py image.jpg`
 🐦 **X Integration** - Posts directly to X/Twitter with image and caption
+🌍 **Location-Based Tags** - Auto-generate relevant hashtags and X accounts to mention based on coordinates
 🎯 **Personality** - Jaume has attitude and calls out mess with humor
 
 ## Setup
@@ -100,6 +101,21 @@ python post_trash.py trash.jpg --location "Downtown Park"
 ```
 
 (Optional - helps with comment generation)
+
+### Auto Location-Based Tags & Mentions
+
+Add relevant hashtags and X account mentions based on GPS coordinates:
+
+```bash
+python post_trash.py trash.jpg --lat 50.85 --lon 4.35
+```
+
+This will automatically:
+- Detect your location (Brussels, Amsterdam, etc.)
+- Add 1-2 relevant local organization mentions
+- Add 3-4 location-specific hashtags (#Brussels, #ClimateAction, etc.)
+
+**It just works with coordinates from your phone's photo metadata!**
 
 ## Supported Formats
 
