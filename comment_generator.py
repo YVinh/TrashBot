@@ -3,10 +3,36 @@ import os
 from pathlib import Path
 from anthropic import Anthropic
 
+# Register HEIC opener for PIL
+try:
+    import pillow_heif
+    pillow_heif.register_heic_opener()
+except ImportError:
+    pass
+
 def load_image_as_base64(image_path: str) -> str:
-    """Convert image file to base64 string."""
-    with open(image_path, "rb") as image_file:
-        return base64.standard_b64encode(image_file.read()).decode("utf-8")
+    """Convert image file to base64 string, converting HEIC to JPEG if needed."""
+    from io import BytesIO
+    from PIL import Image
+
+    image = Image.open(image_path)
+
+    # Convert HEIC/HEIF to JPEG for compatibility
+    if image_path.lower().endswith(('.heic', '.heif')):
+        # Convert to RGB if necessary (HEIC might be RGBA)
+        if image.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+            image = background
+
+        # Save as JPEG to bytes
+        jpeg_buffer = BytesIO()
+        image.save(jpeg_buffer, format='JPEG', quality=95)
+        return base64.standard_b64encode(jpeg_buffer.getvalue()).decode("utf-8")
+    else:
+        # For other formats, read directly
+        with open(image_path, "rb") as image_file:
+            return base64.standard_b64encode(image_file.read()).decode("utf-8")
 
 def get_image_media_type(image_path: str) -> str:
     """Determine media type based on file extension."""
@@ -17,6 +43,8 @@ def get_image_media_type(image_path: str) -> str:
         ".png": "image/png",
         ".gif": "image/gif",
         ".webp": "image/webp",
+        ".heic": "image/jpeg",  # HEIC will be converted to JPEG
+        ".heif": "image/jpeg",  # HEIF will be converted to JPEG
     }
     return media_types.get(ext, "image/jpeg")
 
@@ -41,7 +69,7 @@ def generate_sassy_comment(image_path: str) -> str:
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
     # Validate file is an image
-    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
     if Path(image_path).suffix.lower() not in valid_extensions:
         raise ValueError(f"Unsupported image format. Supported: {valid_extensions}")
 

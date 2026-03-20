@@ -1,6 +1,14 @@
 import os
 from pathlib import Path
 import tweepy
+from io import BytesIO
+
+# Register HEIC opener for PIL
+try:
+    import pillow_heif
+    pillow_heif.register_heic_opener()
+except ImportError:
+    pass
 
 def create_twitter_client() -> tweepy.Client:
     """Create and authenticate a Twitter API v2 client."""
@@ -52,7 +60,7 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
-    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
     if Path(image_path).suffix.lower() not in valid_extensions:
         raise ValueError(f"Unsupported image format. Supported: {valid_extensions}")
 
@@ -60,9 +68,26 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
         raise ValueError(f"Caption too long ({len(caption)} chars). Max: 280 characters")
 
     try:
+        # If HEIC, convert to JPEG first
+        upload_path = image_path
+        if image_path.lower().endswith(('.heic', '.heif')):
+            from PIL import Image
+            img = Image.open(image_path)
+
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA', 'P'):
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                img = background
+
+            # Save as temporary JPEG
+            temp_path = Path(image_path).parent / f"{Path(image_path).stem}_temp.jpg"
+            img.save(temp_path, format='JPEG', quality=95)
+            upload_path = str(temp_path)
+
         # Upload media using v1.1 API
         api_v1 = create_v1_client()
-        media = api_v1.media_upload(filename=image_path)
+        media = api_v1.media_upload(filename=upload_path)
 
         # Post with media using v2 client
         client_v2 = create_twitter_client()
@@ -73,6 +98,13 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
 
         post_id = response.data["id"]
         post_url = f"https://x.com/i/web/status/{post_id}"
+
+        # Clean up temporary file if created
+        if upload_path != image_path:
+            try:
+                Path(upload_path).unlink()
+            except:
+                pass
 
         return {
             "success": True,

@@ -70,13 +70,15 @@ def main():
         coords = extract_gps_coordinates(image_path)
         if coords:
             latitude, longitude = coords
-            print(f"   ✓ Found GPS coordinates in image!")
+            print(f"   ✓ Found GPS coordinates in image: {latitude:.4f}, {longitude:.4f}")
         else:
             print("   ⚠️  No GPS metadata found in image")
             if args.lat or args.lon:
                 print("   Using manually provided coordinates")
             else:
                 print("   💡 Tip: Set --lat and --lon for location-based tags, or add GPS to photo")
+    else:
+        print(f"📍 Using provided coordinates: {latitude:.4f}, {longitude:.4f}")
 
     # Generate comment
     print("✨ Generating sassy comment with Jaume's personality...")

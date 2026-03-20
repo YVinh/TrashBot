@@ -133,6 +133,8 @@ python post_trash.py trash.jpg --lat 50.85 --lon 4.35
 - PNG (.png)
 - GIF (.gif)
 - WebP (.webp)
+- **HEIC (.heic)** - Apple iPhone photos (auto-converted to JPEG)
+- **HEIF (.heif)** - Modern image format (auto-converted to JPEG)
 
 ## Troubleshooting
 
