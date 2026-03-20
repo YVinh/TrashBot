@@ -2,37 +2,43 @@ import base64
 import os
 from pathlib import Path
 from anthropic import Anthropic
-
-# Register HEIC opener for PIL
-try:
-    from pillow_heif import register_heic_opener
-    register_heic_opener()
-except (ImportError, AttributeError):
-    pass
+from PIL import Image
 
 def load_image_as_base64(image_path: str) -> str:
-    """Convert image file to base64 string, converting HEIC to JPEG if needed."""
+    """Convert image file to base64 string, handling HEIC files."""
     from io import BytesIO
-    from PIL import Image
 
-    image = Image.open(image_path)
-
-    # Convert HEIC/HEIF to JPEG for compatibility
     if image_path.lower().endswith(('.heic', '.heif')):
-        # Convert to RGB if necessary (HEIC might be RGBA)
-        if image.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', image.size, (255, 255, 255))
-            background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
-            image = background
-
-        # Save as JPEG to bytes
-        jpeg_buffer = BytesIO()
-        image.save(jpeg_buffer, format='JPEG', quality=95)
-        return base64.standard_b64encode(jpeg_buffer.getvalue()).decode("utf-8")
+        # Use pillow-heif to open HEIC files
+        try:
+            import pillow_heif
+            heif_file = pillow_heif.read(image_path)
+            image = Image.frombytes(
+                heif_file.mode,
+                heif_file.size,
+                heif_file.data
+            )
+        except Exception:
+            # Fallback: try to open normally
+            image = Image.open(image_path)
     else:
-        # For other formats, read directly
-        with open(image_path, "rb") as image_file:
-            return base64.standard_b64encode(image_file.read()).decode("utf-8")
+        image = Image.open(image_path)
+
+    # Convert to RGB if necessary
+    if image.mode in ('RGBA', 'LA', 'P'):
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        if image.mode == 'RGBA':
+            background.paste(image, mask=image.split()[3])
+        else:
+            background.paste(image)
+        image = background
+    elif image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # Save as JPEG to bytes
+    jpeg_buffer = BytesIO()
+    image.save(jpeg_buffer, format='JPEG', quality=95)
+    return base64.standard_b64encode(jpeg_buffer.getvalue()).decode("utf-8")
 
 def get_image_media_type(image_path: str) -> str:
     """Determine media type based on file extension."""

@@ -2,13 +2,7 @@ import os
 from pathlib import Path
 import tweepy
 from io import BytesIO
-
-# Register HEIC opener for PIL
-try:
-    from pillow_heif import register_heic_opener
-    register_heic_opener()
-except (ImportError, AttributeError):
-    pass
+from PIL import Image
 
 def create_twitter_client() -> tweepy.Client:
     """Create and authenticate a Twitter API v2 client."""
@@ -71,14 +65,28 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
         # If HEIC, convert to JPEG first
         upload_path = image_path
         if image_path.lower().endswith(('.heic', '.heif')):
-            from PIL import Image
-            img = Image.open(image_path)
+            try:
+                import pillow_heif
+                heif_file = pillow_heif.read(image_path)
+                img = Image.frombytes(
+                    heif_file.mode,
+                    heif_file.size,
+                    heif_file.data
+                )
+            except Exception:
+                # Fallback: try normal open
+                img = Image.open(image_path)
 
             # Convert to RGB if necessary
             if img.mode in ('RGBA', 'LA', 'P'):
                 background = Image.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                if img.mode == 'RGBA':
+                    background.paste(img, mask=img.split()[3])
+                else:
+                    background.paste(img)
                 img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
 
             # Save as temporary JPEG
             temp_path = Path(image_path).parent / f"{Path(image_path).stem}_temp.jpg"
