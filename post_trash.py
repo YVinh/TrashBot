@@ -110,31 +110,21 @@ def main():
         mentions = get_mentions_for_location(location)
 
         # Build caption smartly to fit X's ~280 character limit
-        # Priority: mentions (1-2 most relevant) → comment → hashtags (3-4 most relevant)
-
-        # Start with 1-2 key mentions
-        key_mentions = mentions[:2]  # Top 2 mentions
-        mentions_str = format_mentions(key_mentions)
-
+        # NOTE: X API has restrictions on automated mentions, so we only use hashtags
         # Keep top 4 hashtags
         key_hashtags = hashtags[:4]
         hashtags_str = format_hashtags(key_hashtags)
 
-        # Build caption: mentions on first line, comment, hashtags on last line
-        caption = f"{mentions_str}\n{comment}\n{hashtags_str}"
-
-        # If still too long, trim mentions
-        if len(caption) > 280:
-            caption = f"{comment}\n{hashtags_str}"
+        # Build caption: comment + hashtags (no automatic mentions due to X API restrictions)
+        caption = f"{comment}\n{hashtags_str}"
 
         # Final length check
         if len(caption) > 280:
             print(f"⚠️  Warning: Caption is {len(caption)} chars (limit ~280)")
             caption = f"{comment}\n#ClimateAction #TrashAlert"
 
-        print(f"✅ Added location-based hashtags and mentions")
+        print(f"✅ Added location-based hashtags")
         print(f"   Location: {location}")
-        print(f"   Mentions: {', '.join(key_mentions)}")
         print(f"   Hashtags: {', '.join(key_hashtags)}")
         print(f"   Total length: {len(caption)} chars\n")
         print(f"📤 Final caption:\n{caption}\n")
