@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from comment_generator import generate_sassy_comment
 from twitter_poster import post_image_with_caption
+from exif_extractor import extract_gps_coordinates
 from tags_mentions import (
     get_location_from_coords,
     generate_hashtags,
@@ -34,13 +35,13 @@ def main():
     parser.add_argument(
         "--lat",
         type=float,
-        help="Latitude of trash location (for location-based tags)",
+        help="Override latitude (auto-extracted from image if available)",
         default=None,
     )
     parser.add_argument(
         "--lon",
         type=float,
-        help="Longitude of trash location (for location-based tags)",
+        help="Override longitude (auto-extracted from image if available)",
         default=None,
     )
     parser.add_argument(
@@ -60,6 +61,23 @@ def main():
 
     print(f"🗑️  Loading image: {image_path}")
 
+    # Try to extract GPS coordinates from image metadata
+    latitude = args.lat
+    longitude = args.lon
+
+    if not latitude or not longitude:
+        print("📍 Checking image for GPS metadata...")
+        coords = extract_gps_coordinates(image_path)
+        if coords:
+            latitude, longitude = coords
+            print(f"   ✓ Found GPS coordinates in image!")
+        else:
+            print("   ⚠️  No GPS metadata found in image")
+            if args.lat or args.lon:
+                print("   Using manually provided coordinates")
+            else:
+                print("   💡 Tip: Set --lat and --lon for location-based tags, or add GPS to photo")
+
     # Generate comment
     print("✨ Generating sassy comment with Jaume's personality...")
     try:
@@ -74,9 +92,9 @@ def main():
     hashtags_used = []
     mentions_used = []
 
-    if args.lat and args.lon:
+    if latitude and longitude:
         # Add location-based hashtags and mentions
-        location = get_location_from_coords(args.lat, args.lon)
+        location = get_location_from_coords(latitude, longitude)
         print(f"📍 Detected location: {location}")
 
         hashtags = generate_hashtags(location)
@@ -112,8 +130,7 @@ def main():
         print(f"   Total length: {len(caption)} chars\n")
         print(f"📤 Final caption:\n{caption}\n")
     else:
-        print("💡 Tip: Add --lat and --lon for auto location-based tags and mentions!")
-        print(f"   Example: python3 post_trash.py image.jpg --lat 50.85 --lon 4.35")
+        print("💡 No location data - posting without location-based tags")
         print(f"\n📤 Caption:\n{caption}\n")
 
     # Post to X if not in test mode

@@ -104,18 +104,28 @@ python post_trash.py trash.jpg --location "Downtown Park"
 
 ### Auto Location-Based Tags & Mentions
 
-Add relevant hashtags and X account mentions based on GPS coordinates:
+Jaume **automatically extracts GPS coordinates from your image's metadata** and adds relevant hashtags and X account mentions! 🌍
+
+Just provide the image path:
 
 ```bash
-python post_trash.py trash.jpg --lat 50.85 --lon 4.35
+python post_trash.py trash.jpg
 ```
 
-This will automatically:
+If your image has GPS data, Jaume will:
 - Detect your location (Brussels, Amsterdam, etc.)
 - Add 1-2 relevant local organization mentions
 - Add 3-4 location-specific hashtags (#Brussels, #ClimateAction, etc.)
 
-**It just works with coordinates from your phone's photo metadata!**
+**No manual coordinates needed!** Modern smartphones embed GPS in photos automatically.
+
+#### Manual Coordinates (Optional Override)
+
+If your image doesn't have GPS metadata, provide coordinates:
+
+```bash
+python post_trash.py trash.jpg --lat 50.85 --lon 4.35
+```
 
 ## Supported Formats
 
