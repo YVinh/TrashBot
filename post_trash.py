@@ -73,6 +73,13 @@ def main():
             print(f"   ✓ Found GPS coordinates in image: {latitude:.4f}, {longitude:.4f}")
         else:
             print("   ⚠️  No GPS metadata found in image")
+            # Debug: Check what EXIF data exists
+            from exif_extractor import get_exif_data
+            exif_info = get_exif_data(image_path)
+            if exif_info:
+                print(f"   📋 Image has EXIF data: {len(exif_info)} tags found")
+                if "GPSInfo" not in exif_info:
+                    print("      (but no GPSInfo tag - location may not have been recorded)")
             if args.lat or args.lon:
                 print("   Using manually provided coordinates")
             else:

@@ -66,7 +66,21 @@ def extract_gps_coordinates(image_path: str) -> tuple or None:
     """
     try:
         image = Image.open(image_path)
-        exif_data = image.getexif()
+
+        # For HEIC files, get EXIF from the image object directly
+        if image_path.lower().endswith(('.heic', '.heif')):
+            try:
+                exif_data = image.getexif()
+            except:
+                # Try alternate method for HEIC
+                exif_data = image.info.get('exif', None)
+                if exif_data:
+                    from PIL.Image import Exif
+                    exif_obj = Exif()
+                    exif_obj.load(exif_data)
+                    exif_data = exif_obj
+        else:
+            exif_data = image.getexif()
 
         if not exif_data:
             return None
@@ -97,34 +111,37 @@ def extract_gps_coordinates(image_path: str) -> tuple or None:
                             longitude = -longitude
 
                         return (latitude, longitude)
-        except (AttributeError, KeyError):
+        except (AttributeError, KeyError, TypeError):
             pass
 
         # Try method 2: Direct tag search (fallback for older versions)
-        for tag_id, value in exif_data.items():
-            tag_name = TAGS.get(tag_id)
-            if tag_name == "GPSInfo":
-                gps_data = {}
-                for sub_tag_id, sub_value in value.items():
-                    sub_tag_name = GPSTAGS.get(sub_tag_id, sub_tag_id)
-                    gps_data[sub_tag_name] = sub_value
+        try:
+            for tag_id, value in exif_data.items():
+                tag_name = TAGS.get(tag_id)
+                if tag_name == "GPSInfo":
+                    gps_data = {}
+                    for sub_tag_id, sub_value in value.items():
+                        sub_tag_name = GPSTAGS.get(sub_tag_id, sub_tag_id)
+                        gps_data[sub_tag_name] = sub_value
 
-                lat = gps_data.get("GPSLatitude")
-                lon = gps_data.get("GPSLongitude")
-                lat_ref = gps_data.get("GPSLatitudeRef", "N")
-                lon_ref = gps_data.get("GPSLongitudeRef", "E")
+                    lat = gps_data.get("GPSLatitude")
+                    lon = gps_data.get("GPSLongitude")
+                    lat_ref = gps_data.get("GPSLatitudeRef", "N")
+                    lon_ref = gps_data.get("GPSLongitudeRef", "E")
 
-                if lat and lon:
-                    latitude = convert_to_degrees(lat)
-                    longitude = convert_to_degrees(lon)
+                    if lat and lon:
+                        latitude = convert_to_degrees(lat)
+                        longitude = convert_to_degrees(lon)
 
-                    if latitude is not None and longitude is not None:
-                        if lat_ref == "S":
-                            latitude = -latitude
-                        if lon_ref == "W":
-                            longitude = -longitude
+                        if latitude is not None and longitude is not None:
+                            if lat_ref == "S":
+                                latitude = -latitude
+                            if lon_ref == "W":
+                                longitude = -longitude
 
-                        return (latitude, longitude)
+                            return (latitude, longitude)
+        except (AttributeError, KeyError, TypeError):
+            pass
 
         return None
 
