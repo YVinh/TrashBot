@@ -5,9 +5,9 @@ from io import BytesIO
 
 # Register HEIC opener for PIL
 try:
-    import pillow_heif
-    pillow_heif.register_heic_opener()
-except ImportError:
+    from pillow_heif import register_heic_opener
+    register_heic_opener()
+except (ImportError, AttributeError):
     pass
 
 def create_twitter_client() -> tweepy.Client:
