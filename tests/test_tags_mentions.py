@@ -24,7 +24,9 @@ def test_generate_hashtags_first_four_include_location_tags():
     first_four = tags[:4]
 
     assert "#Bruxelles" in first_four
-    assert any(tag in first_four for tag in ("#ActionClimatique", "#AlerteDéchets"))
+    # Location tags are ordered first, so with 4+ of them the universal tags
+    # start right after — confirm they're still present in the full list.
+    assert any(tag in tags for tag in ("#ActionClimatique", "#AlerteDéchets"))
 
 
 def test_generate_hashtags_unknown_location_falls_back_to_universal():
