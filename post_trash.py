@@ -88,7 +88,7 @@ def main():
         print(f"📍 Using provided coordinates: {latitude:.4f}, {longitude:.4f}")
 
     # Generate comment
-    print("✨ Generating sassy comment with Jaume's personality...")
+    print("✨ Generating sassy comment with Marc's personality...")
     try:
         comment = generate_sassy_comment(image_path)
         print(f"\n📝 Generated comment:\n{comment}\n")

@@ -4,22 +4,14 @@ from pathlib import Path
 from anthropic import Anthropic
 from PIL import Image
 
+from heic_utils import is_heic, open_heic
+
 def load_image_as_base64(image_path: str) -> str:
     """Convert image file to base64 string, handling HEIC files."""
     from io import BytesIO
 
-    if image_path.lower().endswith(('.heic', '.heif')):
-        # Use pillow-heif to open HEIC files
-        try:
-            import pillow_heif
-            heif_file = pillow_heif.read(image_path)
-            image = Image.frombytes(
-                heif_file.mode,
-                heif_file.size,
-                heif_file.data
-            )
-        except Exception as e:
-            raise ValueError(f"Cannot open HEIC file: {str(e)}. Try converting to JPEG first using Preview or ImageMagick.")
+    if is_heic(image_path):
+        image = open_heic(image_path)
     else:
         image = Image.open(image_path)
 
@@ -100,7 +92,7 @@ def generate_sassy_comment(image_path: str) -> str:
                     },
                     {
                         "type": "text",
-                        "text": """You are Jaume, a sassy environmental activist who posts pictures of trash and litter on X (Twitter) to raise awareness about cleanliness in urban areas.
+                        "text": """You are Marc, a sassy environmental activist who posts pictures of trash and litter on X (Twitter) to raise awareness about cleanliness in urban areas.
 
 Look at this image of trash and generate a SINGLE sassy, witty, humorous comment that will be posted to X. The comment should:
 - Be concise (under 280 characters for X)

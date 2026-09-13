@@ -4,6 +4,8 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from pathlib import Path
 
+from heic_utils import is_heic, get_heic_exif
+
 
 def get_exif_data(image_path: str) -> dict:
     """
@@ -16,8 +18,11 @@ def get_exif_data(image_path: str) -> dict:
         Dictionary of EXIF data with tag names as keys
     """
     try:
-        image = Image.open(image_path)
-        exif_data = image.getexif()
+        if is_heic(image_path):
+            exif_data = get_heic_exif(image_path)
+        else:
+            image = Image.open(image_path)
+            exif_data = image.getexif()
 
         if not exif_data:
             return {}
@@ -58,23 +63,8 @@ def extract_gps_coordinates(image_path: str) -> tuple or None:
         Tuple of (latitude, longitude) in decimal format, or None if not found
     """
     try:
-        # For HEIC files, use pillow-heif to open and get EXIF
-        if image_path.lower().endswith(('.heic', '.heif')):
-            try:
-                import pillow_heif
-                heif_file = pillow_heif.read(image_path)
-                image = Image.frombytes(
-                    heif_file.mode,
-                    heif_file.size,
-                    heif_file.data
-                )
-                # Try to get EXIF from the heif_file object
-                exif_data = heif_file.exif if hasattr(heif_file, 'exif') else None
-                if not exif_data:
-                    exif_data = image.getexif()
-            except Exception:
-                image = Image.open(image_path)
-                exif_data = image.getexif()
+        if is_heic(image_path):
+            exif_data = get_heic_exif(image_path)
         else:
             image = Image.open(image_path)
             exif_data = image.getexif()

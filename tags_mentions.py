@@ -35,27 +35,27 @@ def generate_hashtags(location: str, object_type: str = "trash") -> list:
     Returns:
         List of hashtags
     """
-    # Universal environmental hashtags
+    # Universal environmental hashtags (French)
     universal_tags = [
-        "#ClimateAction",
-        "#TrashAlert",
-        "#UrbanCleanliness",
-        "#ActOnClimate",
-        "#ClimateStrike",
+        "#ActionClimatique",
+        "#AlerteDéchets",
+        "#PropretéUrbaine",
+        "#AgirPourLeClimat",
+        "#GrèvePourLeClimat",
     ]
 
-    # Location-specific hashtags
+    # Location-specific hashtags (French)
     location_tags = {
-        "Brussels": ["#Brussels", "#Bruxelles", "#BXL", "#BrusselsCity"],
-        "Amsterdam": ["#Amsterdam", "#AMS", "#AmsterdamCity"],
-        "Antwerp": ["#Antwerp", "#Antwerpen", "#AntwerpCity"],
-        "Europe": ["#EuropeanCities"],
+        "Brussels": ["#Bruxelles", "#BXL", "#VilleDeBruxelles", "#Bruxellois"],
+        "Amsterdam": ["#Amsterdam", "#AMS", "#VilleAmsterdam"],
+        "Antwerp": ["#Anvers", "#Antwerpen", "#VilleAnvers"],
+        "Europe": ["#VillesEuropéennes"],
     }
 
-    # Combine universal + location-specific
-    tags = universal_tags.copy()
-    if location in location_tags:
-        tags.extend(location_tags[location])
+    # Location-specific first so callers that slice the top N don't lose them
+    # under the generic universal tags.
+    tags = location_tags.get(location, []).copy()
+    tags.extend(universal_tags)
 
     return tags
 

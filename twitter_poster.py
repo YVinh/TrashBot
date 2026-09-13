@@ -4,6 +4,8 @@ import tweepy
 from io import BytesIO
 from PIL import Image
 
+from heic_utils import is_heic, open_heic
+
 def create_twitter_client() -> tweepy.Client:
     """Create and authenticate a Twitter API v2 client."""
     api_key = os.getenv("X_API_KEY")
@@ -64,18 +66,8 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
     try:
         # If HEIC, convert to JPEG first
         upload_path = image_path
-        if image_path.lower().endswith(('.heic', '.heif')):
-            try:
-                import pillow_heif
-                heif_file = pillow_heif.read(image_path)
-                img = Image.frombytes(
-                    heif_file.mode,
-                    heif_file.size,
-                    heif_file.data
-                )
-            except Exception:
-                # Fallback: try normal open
-                img = Image.open(image_path)
+        if is_heic(image_path):
+            img = open_heic(image_path)
 
             # Convert to RGB if necessary
             if img.mode in ('RGBA', 'LA', 'P'):
