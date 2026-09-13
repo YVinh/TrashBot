@@ -52,10 +52,11 @@ def generate_hashtags(location: str, object_type: str = "trash") -> list:
         "Europe": ["#EuropeanCities"],
     }
 
-    # Combine universal + location-specific
-    tags = universal_tags.copy()
-    if location in location_tags:
-        tags.extend(location_tags[location])
+    # Combine location-specific + universal, interleaved so that callers
+    # slicing the first N tags (e.g. hashtags[:4]) still get a mix of both
+    # instead of only ever seeing the universal tags.
+    loc_tags = location_tags.get(location, [])
+    tags = loc_tags[:2] + universal_tags[:2] + loc_tags[2:] + universal_tags[2:]
 
     return tags
 
