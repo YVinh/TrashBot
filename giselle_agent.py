@@ -9,17 +9,21 @@ import os
 
 from anthropic import Anthropic
 
+from personas import GENRE_BASELINE, GISELLE_VOICE
 from tags_mentions import generate_hashtags, format_hashtags
-from x_text_utils import ensure_under_limit, TYPO_INSTRUCTION
+from x_text_utils import ensure_under_limit
 
 MODEL = "claude-opus-4-6"
 YOUSUF_HANDLE = "@yousufbxlpropre"
 HASHTAG_POOL = format_hashtags(generate_hashtags("Brussels")[:4])
 
-SYSTEM_PROMPT = f"""Tu es Giselle, une Bruxelloise excédée, une "meuf outrée" qui ne \
-supporte plus l'état des rues de Bruxelles. Tu réponds aux posts de Marc (un autre \
-compte, un redresseur de torts qui balance des photos de déchets) en surenchérissant \
-avec indignation — et en apportant une VRAIE preuve que la situation est généralisée.
+SYSTEM_PROMPT = f"""Tu es Giselle. Tu réponds aux posts de Marc (un autre compte, qui \
+balance des photos de déchets) en surenchérissant avec indignation — et en apportant une \
+VRAIE preuve que la situation est généralisée.
+
+{GENRE_BASELINE}
+
+{GISELLE_VOICE}
 
 Ton bio X précise déjà que tu es un bot/projet satirique — tu n'as pas besoin de le \
 répéter dans chaque post, mais tu ne dois jamais prétendre être une coïncidence ou \
@@ -32,11 +36,11 @@ sur la saleté / les déchets / la propreté urbaine à Bruxelles. N'utilise JAM
 Facebook comme source (déjà bloqué techniquement, mais ne le mentionne pas non plus \
 comme piste). Si tu ne trouves rien de solide, dis-le et base ta réaction uniquement \
 sur le post de Marc, sans inventer de source.
-2. Écris UNE réponse indignée, dramatique, qui surenchérit sur le post de Marc, en \
-français, avec ta propre voix (excédée, mais jamais méchante envers des personnes \
-précises — vise la situation, les autorités, l'incurie, pas des individus). Tu rages \
-dans le vide, PAS vers Marc ni vers qui que ce soit — pas de "Marc, ..." ni de "tu vois \
-ça ?" ni de vocatif. Personne ne s'adresse comme ça en vrai à quelqu'un dans un post.
+2. Écris UNE réponse dans ta voix qui surenchérit sur le post de Marc, en français \
+(jamais méchante envers des personnes précises — vise la situation, les autorités, \
+l'incurie, pas des individus). Tu rages dans le vide, PAS vers Marc ni vers qui que ce \
+soit — pas de "Marc, ..." ni de "tu vois ça ?" ni de vocatif. Personne ne s'adresse comme \
+ça en vrai à quelqu'un dans un post.
 3. Sur une nouvelle ligne après ta réaction, mets un petit paquet de tags : {YOUSUF_HANDLE} \
 mélangé avec 2 ou 3 hashtags choisis dans cette liste (EN FRANÇAIS, ne les traduis pas et \
 n'en invente pas d'autres) : {HASHTAG_POOL} — la mention ne doit PAS être isolée ni en \
@@ -47,8 +51,6 @@ que X la compte comme une vraie mention).
 ligne, APRÈS cette ligne de tags (le lien affichera son propre aperçu visuel sur X — \
 rien ne doit venir après lui).
 5. Reste sous les 280 caractères au total (lien inclus).
-
-{TYPO_INSTRUCTION}
 
 Réponds UNIQUEMENT avec le texte final du post. Pas d'explication, pas de markdown, \
 pas de guillemets."""
@@ -98,4 +100,47 @@ def generate_reaction(marc_post_text: str) -> str:
         block.text for block in response.content if block.type == "text"
     ).strip()
 
-    return ensure_under_limit(client, MODEL, reaction, "bruxelloise excédée et dramatique")
+    return ensure_under_limit(client, MODEL, reaction, "moralisatrice, chaleureuse, scandalisée")
+
+
+FOLLOWUP_SYSTEM_PROMPT = f"""Tu es Giselle (voir ton profil). Yousuf vient de commenter \
+dans le fil sur les déchets à Bruxelles. Réponds-lui avec UNE courte remarque qui reste \
+dans le sujet (déchets/saleté/incivilité à Bruxelles).
+
+{GENRE_BASELINE}
+
+{GISELLE_VOICE}
+
+Ici, reste bref (une ou deux phrases) — pas de tirade ni de longue démonstration, juste \
+une remarque jetée en passant. Pas de hashtag dans ce message.
+
+Quelque part dans ta phrase (jamais en début de phrase comme une adresse directe), glisse \
+"{YOUSUF_HANDLE}" — obligatoire pour que X compte ça comme une vraie mention, mais ça doit \
+passer inaperçu, pas comme si tu lui parlais en face.
+
+Reste sous les 280 caractères. Réponds UNIQUEMENT avec le texte final. Pas d'explication, \
+pas de markdown, pas de guillemets."""
+
+
+def generate_followup(yousuf_text: str) -> str:
+    """A short comment-section-style reply to Yousuf's latest comment, for the
+    optional extra back-and-forth rounds. No web search, no source, no hashtags."""
+    api_key = os.getenv("CLAUDE_API_KEY")
+    if not api_key:
+        raise ValueError("CLAUDE_API_KEY not found in environment variables.")
+
+    client = Anthropic(api_key=api_key)
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=200,
+        system=FOLLOWUP_SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": f"Yousuf vient d'écrire :\n\n{yousuf_text}\n\nRéponds-lui.",
+            }
+        ],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text").strip()
+    return ensure_under_limit(client, MODEL, text, "moralisatrice, remarque courte")

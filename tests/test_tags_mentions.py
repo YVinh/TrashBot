@@ -13,6 +13,12 @@ def test_get_location_from_coords_known_cities():
     assert get_location_from_coords(51.22, 4.4) == "Antwerp"
 
 
+def test_get_location_from_coords_saint_josse_takes_priority_over_brussels():
+    # Saint-Josse-ten-Noode is fully contained within the wider Brussels box,
+    # so the narrower check must win.
+    assert get_location_from_coords(50.853, 4.372) == "SaintJosse"
+
+
 def test_get_location_from_coords_falls_back_to_europe():
     assert get_location_from_coords(48.85, 2.35) == "Europe"
 
@@ -23,9 +29,18 @@ def test_generate_hashtags_first_four_include_location_tags():
     tags = generate_hashtags("Brussels")
     first_four = tags[:4]
 
-    assert "#Bruxelles" in first_four
-    # Location tags are ordered first, so with 4+ of them the universal tags
-    # start right after — confirm they're still present in the full list.
+    assert "#bruxellespropreté" in first_four
+    # Brussels now has enough location-specific tags that #Bruxelles itself
+    # sits past index 4 — just confirm it's still in the full list.
+    assert "#Bruxelles" in tags
+    assert any(tag in tags for tag in ("#ActionClimatique", "#AlerteDéchets"))
+
+
+def test_generate_hashtags_saint_josse_includes_local_and_regional_tags():
+    tags = generate_hashtags("SaintJosse")
+
+    assert tags[0] == "#SaintJosseNews"
+    assert "#Bruxelles" in tags
     assert any(tag in tags for tag in ("#ActionClimatique", "#AlerteDéchets"))
 
 

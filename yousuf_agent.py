@@ -7,18 +7,22 @@ import os
 
 from anthropic import Anthropic
 
+from personas import GENRE_BASELINE, YOUSUF_VOICE
 from tags_mentions import generate_hashtags, format_hashtags
-from x_text_utils import ensure_under_limit, TYPO_INSTRUCTION
+from x_text_utils import ensure_under_limit
 
 MODEL = "claude-opus-4-6"
+GISELLE_HANDLE = "@GiselleDeBxl"
 HASHTAG_POOL = format_hashtags(generate_hashtags("Brussels")[:4])
 
-SYSTEM_PROMPT = f"""Tu es Yousuf, le commentateur pince-sans-rire du trio. Marc balance \
-des photos de déchets avec la gouaille de Claudy Focan, Giselle surenchérit avec \
-indignation et des preuves trouvées sur le web. Toi, tu observes et tu commentes, avec \
-un humour sec, un peu détaché, jamais aussi dramatique que les deux autres — comme le \
-pote qui reste calme pendant que tout le monde s'énerve, mais qui met quand même de \
-l'huile sur le feu à sa façon.
+SYSTEM_PROMPT = f"""Tu es Yousuf. Marc balance des photos de déchets, Giselle surenchérit \
+avec indignation et des preuves trouvées sur le web. Toi, tu observes et tu commentes — \
+jamais aussi dramatique que les deux autres, mais tu mets quand même de l'huile sur le \
+feu à ta façon.
+
+{GENRE_BASELINE}
+
+{YOUSUF_VOICE}
 
 Ton bio X précise déjà que tu es un bot/projet satirique.
 
@@ -30,17 +34,15 @@ Règles :
 ça — toi t'es pas du genre à en faire trop.
 - Chaque commentaire reste sous les 280 caractères (hashtags inclus).
 
-{TYPO_INSTRUCTION}
-
 - Réponds UNIQUEMENT avec le texte final du commentaire demandé. Pas d'explication, \
 pas de markdown, pas de guillemets."""
 
 
-def _comment(client: Anthropic, context: str, target_label: str) -> str:
+def _comment(client: Anthropic, context: str, target_label: str, extra_instruction: str = "") -> str:
     response = client.messages.create(
         model=MODEL,
         max_tokens=300,
-        system=SYSTEM_PROMPT,
+        system=SYSTEM_PROMPT + extra_instruction,
         messages=[
             {
                 "role": "user",
@@ -52,7 +54,7 @@ def _comment(client: Anthropic, context: str, target_label: str) -> str:
         ],
     )
     text = "".join(block.text for block in response.content if block.type == "text").strip()
-    return ensure_under_limit(client, MODEL, text, "détaché, pince-sans-rire")
+    return ensure_under_limit(client, MODEL, text, "jeune, sec, contrariant")
 
 
 def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str, str]:
@@ -69,6 +71,58 @@ def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str,
     )
 
     comment_on_marc = _comment(client, context, "au post original de Marc")
-    comment_on_giselle = _comment(client, context, "à la réponse de Giselle")
+    comment_on_giselle = _comment(
+        client,
+        context,
+        "à la réponse de Giselle",
+        extra_instruction=(
+            f"\n\nQuelque part dans ce commentaire précis (jamais en début de phrase comme "
+            f'une adresse directe), glisse "{GISELLE_HANDLE}" — obligatoire pour que X '
+            "compte ça comme une vraie mention, mais ça doit passer inaperçu."
+        ),
+    )
 
     return comment_on_marc, comment_on_giselle
+
+
+FOLLOWUP_SYSTEM_PROMPT = f"""Tu es Yousuf (voir ton profil). Giselle vient de répondre \
+dans le fil sur les déchets à Bruxelles. Réponds-lui avec UNE courte remarque qui reste \
+dans le sujet (déchets/saleté/incivilité à Bruxelles).
+
+{GENRE_BASELINE}
+
+{YOUSUF_VOICE}
+
+Ici, reste bref (une ou deux phrases) — pas de tirade ni de longue démonstration, juste \
+une remarque jetée en passant. Pas de hashtag dans ce message.
+
+Quelque part dans ta phrase (jamais en début de phrase comme une adresse directe), glisse \
+"{GISELLE_HANDLE}" — obligatoire pour que X compte ça comme une vraie mention, mais ça \
+doit passer inaperçu, pas comme si tu lui parlais en face.
+
+Reste sous les 280 caractères. Réponds UNIQUEMENT avec le texte final. Pas d'explication, \
+pas de markdown, pas de guillemets."""
+
+
+def generate_followup(giselle_text: str) -> str:
+    """A short comment-section-style reply to Giselle's latest follow-up, for the
+    optional extra back-and-forth rounds."""
+    api_key = os.getenv("CLAUDE_API_KEY")
+    if not api_key:
+        raise ValueError("CLAUDE_API_KEY not found in environment variables.")
+
+    client = Anthropic(api_key=api_key)
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=200,
+        system=FOLLOWUP_SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": f"Giselle vient d'écrire :\n\n{giselle_text}\n\nRéponds-lui.",
+            }
+        ],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text").strip()
+    return ensure_under_limit(client, MODEL, text, "jeune, sec, contrariant")

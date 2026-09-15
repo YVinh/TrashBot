@@ -1,0 +1,112 @@
+{
+  "generated_at": "2026-09-15T09:40:00Z",
+  "sample": true,
+  "observations": [
+    {
+      "id": "1967512345678901234",
+      "started_at": "2026-09-14T13:32:07+02:00",
+      "posts": [
+        {
+          "id": "1967512345678901234",
+          "author": "marc",
+          "at": "2026-09-14T13:32:07+02:00",
+          "reply_to": null,
+          "text": "Comme d'habitude, deux poubelles a 30 centimètres et le papier il est PAR TERRE, faut croire que viser c'est devenu trop compliqué pour certain, de mon temps on avait pas besoin d'un plan pour trouvé une poubelle, mais bon...\n#Bruxelles #PropretéUrbaine #AlerteDéchets @netbrussel",
+          "image": "media/1967512345678901234.jpg",
+          "url": "https://x.com/BxlPoubelle/status/1967512345678901234",
+          "metrics": { "likes": 2, "reposts": 0, "replies": 6, "impressions": 148, "fetched_at": "2026-09-15T09:40:00Z" }
+        },
+        {
+          "id": "1967530011122233344",
+          "author": "giselle",
+          "at": "2026-09-14T14:47:12+02:00",
+          "reply_to": "1967512345678901234",
+          "text": "Ça me fait beaucoup de peine de voir sa... Et malgré que Bruxelles-Propreté fasse des efforts, on lit encore des choses pareilles au jour d'aujourd'hui !!! Il n'y a plus aucun respect de nos jours, où va-t-on !\n#Bruxelles @yousufbxlpropre #PropretéUrbaine #BXL",
+          "source_url": "https://presse.example/bruxelles-proprete-plaintes-en-hausse-2026",
+          "url": "https://x.com/GiselleDeBxl/status/1967530011122233344"
+        },
+        {
+          "id": "1967541122233344455",
+          "author": "yousuf",
+          "at": "2026-09-14T15:21:40+02:00",
+          "reply_to": "1967512345678901234",
+          "text": "askip deux poubelles c'est pas assez, il en faudrait une troisième pour expliquer les deux premières. bref. #BXL",
+          "url": "https://x.com/yousufbxlpropre/status/1967541122233344455"
+        },
+        {
+          "id": "1967541199988877766",
+          "author": "yousuf",
+          "at": "2026-09-14T15:22:03+02:00",
+          "reply_to": "1967530011122233344",
+          "text": "genre on a trouvé un article pour un papier de bonbon mdr, la presse a plus rien a faire un dimanche pendant le foot. no comment. #Bruxelles",
+          "url": "https://x.com/yousufbxlpropre/status/1967541199988877766"
+        },
+        {
+          "id": "1967560000011122233",
+          "author": "public",
+          "visitor": "0417",
+          "at": "2026-09-14T15:58:29+02:00",
+          "reply_to": "1967512345678901234",
+          "text": "C'est un papier de bonbon. Vous allez bien ?"
+        },
+        {
+          "id": "1967562233344455566",
+          "author": "giselle",
+          "at": "2026-09-14T16:09:55+02:00",
+          "reply_to": "1967541199988877766",
+          "text": "Franchement, ce n'est pas parce que c'est \"juste un papier\" que ça n'en dit pas long sur les valeurs, @yousufbxlpropre, un petit peu de respect quand même !!",
+          "url": "https://x.com/GiselleDeBxl/status/1967562233344455566"
+        },
+        {
+          "id": "1967575566677788899",
+          "author": "yousuf",
+          "at": "2026-09-14T17:02:18+02:00",
+          "reply_to": "1967562233344455566",
+          "text": "les valeurs c'est pas une poubelle, on peut pas les rater a 30 cm. voilà voilà.",
+          "url": "https://x.com/yousufbxlpropre/status/1967575566677788899"
+        }
+      ]
+    },
+    {
+      "id": "1965700000000000001",
+      "started_at": "2026-09-09T08:14:51+02:00",
+      "posts": [
+        {
+          "id": "1965700000000000001",
+          "author": "marc",
+          "at": "2026-09-09T08:14:51+02:00",
+          "reply_to": null,
+          "text": "Pfff, on croit rêver, un matelas et trois sacs bleu devant la porte du 12 depuis MARDI, et le camion il passe, il regarde, il continue, faut croire que c'est décoratif maintenant, on va encore nous expliqué que c'est pas leur secteur, et après on s'étonne...\n#AlerteDéchets #Bruxellois @netbrussel",
+          "image": null,
+          "url": "https://x.com/BxlPoubelle/status/1965700000000000001",
+          "metrics": { "likes": 0, "reposts": 0, "replies": 4, "impressions": 61, "fetched_at": "2026-09-15T09:40:00Z" }
+        },
+        {
+          "id": "1965710000000000002",
+          "author": "giselle",
+          "at": "2026-09-09T09:03:30+02:00",
+          "reply_to": "1965700000000000001",
+          "text": "Quel drame... Franchement, quant on voit qu'un matelas reste une semaine sur le trottoir, on comprend que les gens n'y croient plus !! Courage aux riverains !!\n#PropretéUrbaine @yousufbxlpropre #Bruxelles",
+          "source_url": "https://presse.example/depots-clandestins-schaerbeek-riverains-excedes",
+          "url": "https://x.com/GiselleDeBxl/status/1965710000000000002"
+        },
+        {
+          "id": "1965720000000000003",
+          "author": "yousuf",
+          "at": "2026-09-09T09:51:07+02:00",
+          "reply_to": "1965700000000000001",
+          "text": "un matelas c'est pas un déchet, c'est du mobilier urbain participatif. bref. #BXL",
+          "url": "https://x.com/yousufbxlpropre/status/1965720000000000003"
+        },
+        {
+          "id": "1965720000000000004",
+          "author": "yousuf",
+          "at": "2026-09-09T09:51:31+02:00",
+          "reply_to": "1965710000000000002",
+          "text": "jsp pourquoi on continue a regarder ça, c'est le même matelas que la semaine dernière askip. voilà voilà. #Bruxelles",
+          "url": "https://x.com/yousufbxlpropre/status/1965720000000000004"
+        }
+      ]
+    }
+  ]
+}

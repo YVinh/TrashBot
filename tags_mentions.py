@@ -11,8 +11,13 @@ def get_location_from_coords(latitude: float, longitude: float) -> str:
     Returns:
         Location name as string
     """
+    # Saint-Josse-ten-Noode: Belgium's smallest commune (~1.1 km²), centered
+    # on 50.853°N, 4.372°E — checked before the wider Brussels box below since
+    # it's fully contained within it.
+    if 50.848 <= latitude <= 50.858 and 4.365 <= longitude <= 4.380:
+        return "SaintJosse"
     # Brussels area: 50.85°N, 4.35°E
-    if 50.7 <= latitude <= 50.9 and 4.2 <= longitude <= 4.5:
+    elif 50.7 <= latitude <= 50.9 and 4.2 <= longitude <= 4.5:
         return "Brussels"
     # Amsterdam area
     elif 52.3 <= latitude <= 52.4 and 4.8 <= longitude <= 5.0:
@@ -44,13 +49,36 @@ def generate_hashtags(location: str, object_type: str = "trash") -> list:
         "#GrèvePourLeClimat",
     ]
 
-    # Location-specific hashtags (French)
+    # Location-specific hashtags (French). For Brussels, #bruxellespropreté and
+    # #netbrussel are the real hashtags Bruxelles-Propreté's own official
+    # Instagram actually uses (verified directly —
+    # https://www.instagram.com/bruxellesproprete_netbrussel/); #brugov and
+    # #réformerBruxelles were supplied directly by the project owner from
+    # their own browsing, not independently re-verified here. SaintJosse gets
+    # its own commune-specific tag when GPS resolves that precisely.
     location_tags = {
-        "Brussels": ["#Bruxelles", "#BXL", "#VilleDeBruxelles", "#Bruxellois"],
+        "SaintJosse": ["#SaintJosseNews"],
+        "Brussels": [
+            "#bruxellespropreté",
+            "#netbrussel",
+            "#brugov",
+            "#réformerBruxelles",
+            "#Bruxelles",
+            "#BXL",
+            "#VilleDeBruxelles",
+            "#Bruxellois",
+        ],
         "Amsterdam": ["#Amsterdam", "#AMS", "#VilleAmsterdam"],
         "Antwerp": ["#Anvers", "#Antwerpen", "#VilleAnvers"],
         "Europe": ["#VillesEuropéennes"],
     }
+
+    # SaintJosse is a specific commune within Brussels — always add the
+    # regional tags too so it isn't limited to just the one local tag.
+    if location == "SaintJosse":
+        tags = location_tags["SaintJosse"] + location_tags["Brussels"]
+        tags.extend(universal_tags)
+        return tags
 
     # Location-specific first so callers that slice the top N don't lose them
     # under the generic universal tags.

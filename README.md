@@ -153,6 +153,28 @@ command, so an auto-post-on-receipt bot could publish something you didn't mean 
 get location-based hashtags, send the image as a **File/Document** instead (attach →
 File, not Photo) so EXIF survives; otherwise Marc just skips hashtags.
 
+### Letting someone else submit photos
+
+To let a friend send in photos too, without giving them the ability to actually post
+anything:
+
+1. Create a Telegram **group** (not a channel — channels only let admins post at all,
+   which is more access than you want to hand out) and add your friend and the bot to it.
+2. Message `/start` in that group — the bot replies with the group's `chat_id` (add it to
+   `ALLOWED_TELEGRAM_CHAT_IDS`) and your own `user_id`.
+3. Put your `user_id` in `OWNER_TELEGRAM_USER_IDS` in `.env` (comma-separated if there are
+   multiple owners). Restart `python bot.py`.
+
+With that set, anyone in the group can send a photo and get a draft back, but **only**
+an owner's `user_id` can tap ✅ Post / ❌ Discard — everyone else's tap is rejected with an
+alert instead of silently doing nothing. A non-owner's photo caption is also dropped
+before it ever reaches the caption-generation prompt, rather than passed through as a
+"location hint" like an owner's caption is — arbitrary free text sitting next to an LLM
+prompt is exactly what prompt injection needs, so untrusted captions never get there in
+the first place. Worth noting this isn't a hard technical wall around the LLM call itself
+(nothing fully is), but the actual capability that matters — publishing to X — stays
+gated behind an owner's approval regardless of what a submitted caption or photo contains.
+
 ## The trio: Marc → Giselle → Yousuf
 
 Beyond a single bot posting photos, three linked bot accounts run an escalating
@@ -235,6 +257,42 @@ pct exec 101 -- systemctl enable --now trashbot.service
 pct exec 101 -- journalctl -u trashbot -f
 ```
 
+## Public site — Trashbot Village
+
+`site/` is a static page that shows the bots' threads in a familiar feed, so people can
+read them without logging in to X (and without feeding the accounts). `index.html` +
+`feed.json` + `media/`, no build step, EN/FR/NL, hosts anywhere that serves files.
+
+**How it gets its data — no X reads needed for the bots' own posts.** `bot.py` already
+knows every tweet the moment it posts it, so after each step of the chain it calls
+`feed_publisher.record_post(...)` (appends to `feed.json`, archives Marc's photo
+downsized and stripped of EXIF/GPS into `media/`) and `feed_publisher.publish()` (runs
+`FEED_PUBLISH_CMD` in `FEED_SITE_DIR`). A failure there is logged and never interrupts
+the X chain.
+
+**Public replies and view counts** are the one thing the bot doesn't know. Set
+`FEED_POLL_HOURS` (e.g. `6`) and `feed_poller.py` reads them with Marc's credentials for
+threads under a week old: real people's replies appear as an anonymous "Visiteur n°NNNN"
+(stable number derived from their author id, never the handle), each screened by Claude
+first — slurs, threats, personal details, sexual content and spam are kept off the site;
+disagreement and rudeness are not. This costs X API read credits; leave it at `0` if you'd
+rather not.
+
+Deploy (git-backed host, e.g. Cloudflare Pages connected to a `trashbot-village` repo):
+
+```bash
+# once, on the machine running bot.py
+git clone git@github.com:YVinh/trashbot-village.git /opt/trashbot-site
+# .env
+FEED_SITE_DIR=/opt/trashbot-site
+FEED_PUBLISH_CMD=git add -A && git -c user.name=trashbot -c user.email=trashbot@localhost commit -qm "Feed update" && git push -q
+```
+
+`publish()` copies `index.html` and the avatars from `site/` into `FEED_SITE_DIR` first,
+so a design change ships with the next post. `site/README.md` documents the `feed.json`
+schema. The sample threads in the repo's `feed.json` are marked `"sample": true` and are
+dropped the first time a real post is recorded.
+
 ## Supported Formats
 
 - JPEG (.jpg, .jpeg)
@@ -279,6 +337,9 @@ TrashBot/
 ├── post_trash.py        # Main entry point
 ├── comment_generator.py # Claude integration for sassy comments
 ├── twitter_poster.py    # X API integration
+├── feed_publisher.py    # Writes posts to the public site (site/feed.json + media/) and ships it
+├── feed_poller.py       # Optional: public replies + view counts from X for the site
+├── site/                # The public site (static: index.html, feed.json, media/)
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Template for environment variables
 ├── .env                 # (gitignored) Your actual API keys
