@@ -24,6 +24,7 @@ from pathlib import Path
 from PIL import Image
 
 from heic_utils import is_heic, open_heic
+import link_preview
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +108,15 @@ def record_post(
     if url:
         post["url"] = url
     if author == "giselle":
-        # Her "proof" is the trailing link; the site renders it as a link card.
+        # Her "proof" is the trailing link; the site renders it as a link card
+        # with the article's own title and picture, fetched now (X does the same
+        # server-side — the browser can't read another site's page).
         urls = URL_RE.findall(text)
         if urls:
             post["source_url"] = urls[-1].rstrip(".,)")
+            card = link_preview.fetch_card(post["source_url"], SITE_DIR / "media", post_id)
+            if card:
+                post["source_card"] = card
     if image_path:
         try:
             post["image"] = _archive_image(image_path, post_id)
@@ -147,6 +153,57 @@ def set_metrics(chain_id: str, post_id: str, metrics: dict) -> bool:
                 save_feed(data)
                 return True
     return False
+
+
+def set_report(chain_id: str, post_id: str, report: dict) -> bool:
+    """Attach the FixMyStreet report (id, url, category, status) to Marc's post."""
+    data = load_feed()
+    for obs in data["observations"]:
+        if obs["id"] != chain_id:
+            continue
+        for post in obs["posts"]:
+            if post["id"] == post_id:
+                post["report"] = {**post.get("report", {}), **report}
+                save_feed(data)
+                return True
+    return False
+
+
+def refresh_report_statuses(lookup) -> bool:
+    """Update the status of open reports via `lookup(id) -> {status, ...} | None`.
+    Returns True if anything changed."""
+    data = load_feed()
+    changed = False
+    for obs in data["observations"]:
+        for post in obs["posts"]:
+            rep = post.get("report")
+            if not rep or rep.get("status") in ("CLOSED", "DISMISSED"):
+                continue
+            info = lookup(rep["id"])
+            if info and info.get("status") and info["status"] != rep.get("status"):
+                rep["status"] = info["status"]
+                if info.get("organisation"):
+                    rep["organisation"] = info["organisation"]
+                changed = True
+    if changed:
+        save_feed(data)
+    return changed
+
+
+def backfill_cards() -> int:
+    """Fetch link cards for Giselle posts recorded before cards existed."""
+    data = load_feed()
+    n = 0
+    for obs in data["observations"]:
+        for post in obs["posts"]:
+            if post.get("source_url") and "source_card" not in post:
+                card = link_preview.fetch_card(post["source_url"], SITE_DIR / "media", post["id"])
+                if card:
+                    post["source_card"] = card
+                    n += 1
+    if n:
+        save_feed(data)
+    return n
 
 
 def publish():

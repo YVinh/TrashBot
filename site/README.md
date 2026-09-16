@@ -29,6 +29,8 @@ engagement counts). Deployment: see "Public site" in the project README.
           "image": "media/<id>.jpg" | null,   // marc only
           "url": "https://x.com/...",         // omitted for public replies
           "source_url": "https://...",        // giselle's cited proof, if any
+          "source_card": { "title": "...", "description": "...", "site": "RTBF",
+                           "image": "media/<id>-card.jpg" },  // its Open Graph data, fetched at post time
           "metrics": { "likes": 0, "reposts": 0, "replies": 0, "impressions": 0,
                        "fetched_at": "ISO-8601" },   // optional, marc's post
           "visitor": "0417"                   // public only: anonymised id, no handle

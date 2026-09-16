@@ -14,7 +14,19 @@
           "text": "Comme d'habitude, deux poubelles a 30 centimètres et le papier il est PAR TERRE, faut croire que viser c'est devenu trop compliqué pour certain, de mon temps on avait pas besoin d'un plan pour trouvé une poubelle, mais bon...\n#Bruxelles #PropretéUrbaine #AlerteDéchets @netbrussel",
           "image": "media/1967512345678901234.jpg",
           "url": "https://x.com/BxlPoubelle/status/1967512345678901234",
-          "metrics": { "likes": 2, "reposts": 0, "replies": 6, "impressions": 148, "fetched_at": "2026-09-15T09:40:00Z" }
+          "metrics": {
+            "likes": 2,
+            "reposts": 0,
+            "replies": 6,
+            "impressions": 148,
+            "fetched_at": "2026-09-15T09:40:00Z"
+          },
+          "report": {
+            "id": 1205894,
+            "url": "https://fixmystreet.brussels/incidents/1205894",
+            "category": "Dépôt clandestin > encombrants > < 1 m³",
+            "status": "PROCESSING"
+          }
         },
         {
           "id": "1967530011122233344",
@@ -79,7 +91,13 @@
           "text": "Pfff, on croit rêver, un matelas et trois sacs bleu devant la porte du 12 depuis MARDI, et le camion il passe, il regarde, il continue, faut croire que c'est décoratif maintenant, on va encore nous expliqué que c'est pas leur secteur, et après on s'étonne...\n#AlerteDéchets #Bruxellois @netbrussel",
           "image": null,
           "url": "https://x.com/BxlPoubelle/status/1965700000000000001",
-          "metrics": { "likes": 0, "reposts": 0, "replies": 4, "impressions": 61, "fetched_at": "2026-09-15T09:40:00Z" }
+          "metrics": {
+            "likes": 0,
+            "reposts": 0,
+            "replies": 4,
+            "impressions": 61,
+            "fetched_at": "2026-09-15T09:40:00Z"
+          }
         },
         {
           "id": "1965710000000000002",

@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import random
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ from telegram.ext import (
 import chain_state
 import feed_publisher
 import feed_poller
+import fixmystreet
+from exif_extractor import extract_gps_coordinates
 from trash_agent import generate_post_draft
 from twitter_poster import post_image_with_caption
 from giselle_agent import generate_reaction as giselle_react, generate_followup as giselle_followup
@@ -61,6 +64,13 @@ PENDING: dict[str, dict] = {}
 # site. 0 (default) = never — reads cost X API credits, the bots' own posts
 # reach the site without any (see feed_publisher.py / feed_poller.py).
 FEED_POLL_HOURS = float(os.getenv("FEED_POLL_HOURS", "0") or 0)
+
+# FixMyStreet Brussels reports. Only offered for photos sent to the bot in a
+# private chat by an owner (never from the group) and only when the photo has
+# GPS. FMS_DRY_RUN=1 does everything except the final "send", for a first test.
+FMS_ENABLED = os.getenv("FMS_ENABLED", "1") != "0"
+FMS_DRY_RUN = os.getenv("FMS_DRY_RUN", "0") == "1"
+FMS_STATUS_POLL_HOURS = float(os.getenv("FMS_STATUS_POLL_HOURS", "12") or 0)
 
 # Reactions land at a random point within the hour, not instantly — real
 # people don't reply to a tweet within milliseconds.
@@ -161,21 +171,42 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_path.unlink(missing_ok=True)
         return
 
-    token = tg_file.file_unique_id
-    PENDING[token] = {"image_path": str(image_path), "caption": caption, "ts": time.time()}
+    gps = extract_gps_coordinates(str(image_path))
+    report_ok = (
+        FMS_ENABLED
+        and submitter_is_owner
+        and update.effective_chat.type == "private"
+        and gps is not None
+    )
 
-    keyboard = InlineKeyboardMarkup(
-        [
+    token = tg_file.file_unique_id
+    PENDING[token] = {
+        "image_path": str(image_path), "caption": caption, "ts": time.time(), "gps": gps, "report_ok": report_ok,
+    }
+
+    if report_ok:
+        rows = [
+            [InlineKeyboardButton("✅ Post + report to FixMyStreet", callback_data=f"postreport:{token}")],
+            [
+                InlineKeyboardButton("🐦 Post only", callback_data=f"post:{token}"),
+                InlineKeyboardButton("❌ Discard", callback_data=f"discard:{token}"),
+            ],
+        ]
+    else:
+        rows = [
             [
                 InlineKeyboardButton("✅ Post to X", callback_data=f"post:{token}"),
                 InlineKeyboardButton("❌ Discard", callback_data=f"discard:{token}"),
             ]
         ]
-    )
+    keyboard = InlineKeyboardMarkup(rows)
     sender_name = update.effective_user.first_name or "someone"
     owner_note = "" if submitter_is_owner else f"\n(from {sender_name} — only an owner can approve)"
+    fms_note = ""
+    if FMS_ENABLED and submitter_is_owner and update.effective_chat.type == "private" and gps is None:
+        fms_note = "\n(no GPS in this photo — send it as a File to be able to report it to FixMyStreet)"
     await status.edit_text(
-        f"📝 Draft:\n\n{caption}\n\n({len(caption)} chars){owner_note}", reply_markup=keyboard
+        f"📝 Draft:\n\n{caption}\n\n({len(caption)} chars){owner_note}{fms_note}", reply_markup=keyboard
     )
 
 
@@ -203,6 +234,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         Path(entry["image_path"]).unlink(missing_ok=True)
         return
 
+    report_copy = None
+    if action == "postreport" and entry.get("report_ok"):
+        # The photo is deleted right after posting; the report needs it a bit longer.
+        report_copy = Path(entry["image_path"]).with_name(Path(entry["image_path"]).stem + "-fms" + Path(entry["image_path"]).suffix)
+        shutil.copy2(entry["image_path"], report_copy)
+
     try:
         result = await asyncio.to_thread(
             post_image_with_caption, entry["image_path"], entry["caption"]
@@ -219,9 +256,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("Failed to post to X")
         await query.edit_message_text(f"❌ Failed to post: {e}")
+        if report_copy:
+            report_copy.unlink(missing_ok=True)
         return
     finally:
         Path(entry["image_path"]).unlink(missing_ok=True)
+
+    if report_copy:
+        context.application.create_task(
+            _report_to_fixmystreet(
+                context.application, update.effective_chat.id, str(report_copy), entry["gps"], result["post_id"]
+            ),
+            update=update,
+        )
 
     # Fire-and-forget: the chain unfolds over up to ~an hour with random
     # delays, so it must not block this callback. State is saved to disk
@@ -368,6 +415,47 @@ async def _chain_giselle_and_yousuf(application: Application, state: dict):
     chain_state.clear_chain(marc_tweet_id)
 
 
+async def _report_to_fixmystreet(application: Application, chat_id: int, image_path: str, gps, marc_tweet_id: str):
+    """File the FixMyStreet report for an approved photo. Fail-soft: any
+    problem is reported to the owner and never touches the X chain."""
+    bot = application.bot
+    lat, lon = gps
+    try:
+        r = await asyncio.to_thread(fixmystreet.report_trash, image_path, lat, lon, dry_run=FMS_DRY_RUN)
+        if r.get("dry_run"):
+            await bot.send_message(
+                chat_id,
+                f"🏛️ DRY RUN — would report to FixMyStreet (nothing sent):\n{r['category']}\n{r['address']}\n« {r['description']} »\nSet FMS_DRY_RUN=0 to file for real.",
+            )
+            return
+        if not r["filed"]:
+            await bot.send_message(chat_id, f"🏛️ Not reported to FixMyStreet: {r['reason']}")
+            return
+        await bot.send_message(
+            chat_id, f"🏛️ Reported to FixMyStreet\n{r['category']}\n{r['address']}\n« {r['description']} »\n{r['url']}"
+        )
+        report = {"id": r["id"], "url": r["url"], "category": r["category"], "status": "PROCESSING"}
+        await asyncio.to_thread(feed_publisher.set_report, marc_tweet_id, marc_tweet_id, report)
+        await asyncio.to_thread(feed_publisher.publish)
+    except fixmystreet.FixMyStreetError as e:
+        await bot.send_message(chat_id, f"⚠️ FixMyStreet report failed: {e}")
+    except Exception as e:
+        logger.exception("FixMyStreet report failed")
+        await bot.send_message(chat_id, f"⚠️ FixMyStreet report failed: {e}")
+    finally:
+        Path(image_path).unlink(missing_ok=True)
+
+
+async def _refresh_report_statuses_forever():
+    while True:
+        try:
+            if await asyncio.to_thread(feed_publisher.refresh_report_statuses, fixmystreet.status):
+                await asyncio.to_thread(feed_publisher.publish)
+        except Exception:
+            logger.exception("FixMyStreet status refresh failed")
+        await asyncio.sleep(FMS_STATUS_POLL_HOURS * 3600)
+
+
 async def _poll_public_feed_forever():
     while True:
         try:
@@ -393,6 +481,8 @@ async def _resume_pending_chains(application: Application):
     if FEED_POLL_HOURS > 0:
         logger.info("Public feed: polling X for replies/metrics every %.1f h", FEED_POLL_HOURS)
         asyncio.create_task(_poll_public_feed_forever())
+    if FMS_ENABLED and FMS_STATUS_POLL_HOURS > 0:
+        asyncio.create_task(_refresh_report_statuses_forever())
 
 
 def main():

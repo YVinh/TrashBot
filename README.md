@@ -267,8 +267,10 @@ read them without logging in to X (and without feeding the accounts). `index.htm
 knows every tweet the moment it posts it, so after each step of the chain it calls
 `feed_publisher.record_post(...)` (appends to `feed.json`, archives Marc's photo
 downsized and stripped of EXIF/GPS into `media/`) and `feed_publisher.publish()` (runs
-`FEED_PUBLISH_CMD` in `FEED_SITE_DIR`). A failure there is logged and never interrupts
-the X chain.
+`FEED_PUBLISH_CMD` in `FEED_SITE_DIR`). For Giselle's replies it also fetches the linked
+article's Open Graph title/description/picture (`link_preview.py`, stdlib only) so the
+site can show the same link card X does — sites that block scrapers (Le Soir, BX1) get a
+plain domain card. A failure anywhere here is logged and never interrupts the X chain.
 
 **Public replies and view counts** are the one thing the bot doesn't know. Set
 `FEED_POLL_HOURS` (e.g. `6`) and `feed_poller.py` reads them with Marc's credentials for
@@ -292,6 +294,25 @@ FEED_PUBLISH_CMD=git add -A && git -c user.name=trashbot -c user.email=trashbot@
 so a design change ships with the next post. `site/README.md` documents the `feed.json`
 schema. The sample threads in the repo's `feed.json` are marked `"sample": true` and are
 dropped the first time a real post is recorded.
+
+## FixMyStreet Brussels reports
+
+For photos you send the bot **in a private chat** (never from the group), with GPS (send as a
+File), the draft gets a third button: **Post + report to FixMyStreet**. On tap, after the X
+post, `fixmystreet.py` files a real report with the Region's platform, in the name/email set
+in `FMS_REPORTER_*` — a report to a public administration is yours, not Marc's.
+
+The site has no public write API; the module speaks to the backend its own web app uses
+(`/gis/localize` for the address, `POST /api/incidents` + comment + photo + `ack`), no
+login, no captcha. Before anything is written, Claude looks at the photo *soberly*: it may
+decline (a lone wrapper next to a bin is not an illegal dump), otherwise it picks the
+best-fitting leaf of the live "Propreté publique" category tree and writes a short, polite
+French description. The photo is uploaded without metadata. The incident URL comes back to
+you in Telegram and appears under Marc's post on the site ("Signalé à la Région · n° …"),
+whose status is refreshed from the public incident page every `FMS_STATUS_POLL_HOURS`.
+
+Fail-soft: a failed report never touches the X chain — you get a ⚠️ instead. `FMS_DRY_RUN=1`
+runs the analysis and address lookup and tells you what it *would* file, writing nothing.
 
 ## Supported Formats
 
@@ -339,6 +360,8 @@ TrashBot/
 ├── twitter_poster.py    # X API integration
 ├── feed_publisher.py    # Writes posts to the public site (site/feed.json + media/) and ships it
 ├── feed_poller.py       # Optional: public replies + view counts from X for the site
+├── link_preview.py      # Open Graph title/picture for Giselle's article links
+├── fixmystreet.py       # Real reports to fixmystreet.brussels for approved photos
 ├── site/                # The public site (static: index.html, feed.json, media/)
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Template for environment variables
