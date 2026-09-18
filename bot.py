@@ -485,6 +485,19 @@ async def _resume_pending_chains(application: Application):
         asyncio.create_task(_refresh_report_statuses_forever())
 
 
+async def _handle_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    # PTB's own polling loop already retries transient network errors (its
+    # log line just says "No error handlers are registered" otherwise,
+    # which reads like something is broken when it isn't) — log those at
+    # warning without a traceback, and anything else at error with one.
+    from telegram.error import NetworkError
+
+    if isinstance(context.error, NetworkError):
+        logger.warning("Transient network error (self-recovering): %s", context.error)
+    else:
+        logger.error("Unhandled exception in update handling", exc_info=context.error)
+
+
 def main():
     if not TELEGRAM_TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN not set in .env")
@@ -504,6 +517,7 @@ def main():
     app.add_handler(CommandHandler("start", handle_start))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_error_handler(_handle_error)
     logger.info("Marc TrashBot polling started")
     app.run_polling()
 

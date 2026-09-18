@@ -5,6 +5,7 @@ from io import BytesIO
 from PIL import Image
 
 from heic_utils import is_heic, open_heic
+from x_accounts import call_with_retry
 
 def create_twitter_client() -> tweepy.Client:
     """Create and authenticate a Twitter API v2 client."""
@@ -87,13 +88,12 @@ def post_image_with_caption(image_path: str, caption: str) -> dict:
 
         # Upload media using v1.1 API
         api_v1 = create_v1_client()
-        media = api_v1.media_upload(filename=upload_path)
+        media = call_with_retry(api_v1.media_upload, filename=upload_path)
 
         # Post with media using v2 client
         client_v2 = create_twitter_client()
-        response = client_v2.create_tweet(
-            text=caption,
-            media_ids=[media.media_id],
+        response = call_with_retry(
+            client_v2.create_tweet, text=caption, media_ids=[media.media_id]
         )
 
         post_id = response.data["id"]
