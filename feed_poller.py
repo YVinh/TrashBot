@@ -54,6 +54,18 @@ def visitor_number(author_id: str | int) -> str:
 
 
 def fit_to_show(text: str) -> bool:
+    import local_llm
+
+    if local_llm.use_local():
+        try:
+            verdict = local_llm.chat(local_llm.writer_model(), [
+                {"role": "system", "content": MODERATION_PROMPT},
+                {"role": "user", "content": f"Reply to screen:\n\n{text}"},
+            ], max_tokens=16, temperature=0)
+            return verdict.strip().upper().startswith("SHOW")
+        except local_llm.LocalLLMError:
+            logger.exception("Local moderation failed — public reply hidden (fail-closed)")
+            return False
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         logger.warning("CLAUDE_API_KEY not set — public reply hidden (fail-closed)")

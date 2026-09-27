@@ -6,12 +6,14 @@ linked, cited real source."""
 from __future__ import annotations
 
 import os
+import random
 
 from anthropic import Anthropic
 
+from local_llm import use_local
 from personas import GENRE_BASELINE, GISELLE_VOICE
 from tags_mentions import generate_hashtags, format_hashtags
-from x_text_utils import ensure_under_limit
+from x_text_utils import ensure_under_limit, finish_local
 
 MODEL = "claude-opus-4-6"
 YOUSUF_HANDLE = "@yousufbxlpropre"
@@ -56,8 +58,51 @@ Réponds UNIQUEMENT avec le texte final du post. Pas d'explication, pas de markd
 pas de guillemets."""
 
 
+LOCAL_SYSTEM_PROMPT = f"""Tu es Giselle. Tu réponds aux posts de Marc (un autre compte, qui \
+balance des photos de déchets) en surenchérissant avec indignation.
+
+{GENRE_BASELINE}
+
+{GISELLE_VOICE}
+
+On te donne le post de Marc et, parfois, un article de presse bruxellois récent sur le même sujet. \
+Écris UNE réaction dans ta voix, en français, qui surenchérit sur le post de Marc. S'il y a un \
+article, appuie-toi dessus comme preuve que c'est partout pareil — sans rien inventer au-delà de son \
+titre et de son résumé, et sans citer le nom du journal. S'il n'y a pas d'article, réagis seulement \
+au post de Marc, sans inventer de source ni de chiffre.
+Jamais méchante envers des personnes précises. Tu rages dans le vide : pas de "Marc, ...", pas de \
+vocatif, tu ne t'adresses à personne.
+Pas de hashtag, pas de mention @, pas de lien : ils sont ajoutés automatiquement après.
+Maximum 180 caractères. Réponds UNIQUEMENT avec la réaction, sans guillemets ni explication."""
+
+
+def _local_reaction(marc_post_text: str) -> str:
+    import local_llm
+    import news_rss
+
+    article = news_rss.pick_article()
+    user = f"Post de Marc :\n{marc_post_text}\n\n"
+    if article:
+        user += f"Article ({article['published']:%d/%m}) : {article['title']}\n{article['summary'][:400]}"
+    else:
+        user += "Pas d'article cette fois."
+    text = local_llm.chat(local_llm.writer_model(), [
+        {"role": "system", "content": LOCAL_SYSTEM_PROMPT}, {"role": "user", "content": user},
+    ], max_tokens=200, temperature=0.9)
+    text = text.strip().strip('"').strip("«»").strip()
+    pool = HASHTAG_POOL.split()
+    tags = random.sample(pool, min(random.choice([2, 3]), len(pool))) + [YOUSUF_HANDLE]
+    random.shuffle(tags)
+    if article:
+        news_rss.mark_used(article["link"])
+    return finish_local(f"{text}\n{' '.join(tags)}", "moralisatrice, chaleureuse, scandalisée",
+                        [YOUSUF_HANDLE], pool, url=article["link"] if article else None)
+
+
 def generate_reaction(marc_post_text: str) -> str:
     """Run Giselle's research+reaction and return the final reply text."""
+    if use_local():
+        return _local_reaction(marc_post_text)
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         raise ValueError("CLAUDE_API_KEY not found in environment variables.")
@@ -125,6 +170,14 @@ pas de markdown, pas de guillemets."""
 def generate_followup(yousuf_text: str) -> str:
     """A short comment-section-style reply to Yousuf's latest comment, for the
     optional extra back-and-forth rounds. No web search, no source, no hashtags."""
+    if use_local():
+        import local_llm
+
+        text = local_llm.chat(local_llm.writer_model(), [
+            {"role": "system", "content": FOLLOWUP_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Yousuf vient d'écrire :\n\n{yousuf_text}\n\nRéponds-lui."},
+        ], max_tokens=160, temperature=0.9)
+        return finish_local(text.strip().strip('"'), "moralisatrice, remarque courte", [YOUSUF_HANDLE], [])
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         raise ValueError("CLAUDE_API_KEY not found in environment variables.")

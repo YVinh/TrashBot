@@ -7,9 +7,10 @@ import os
 
 from anthropic import Anthropic
 
+from local_llm import use_local
 from personas import GENRE_BASELINE, YOUSUF_VOICE
 from tags_mentions import generate_hashtags, format_hashtags
-from x_text_utils import ensure_under_limit
+from x_text_utils import ensure_under_limit, finish_local
 
 MODEL = "claude-opus-4-6"
 GISELLE_HANDLE = "@GiselleDeBxl"
@@ -38,7 +39,22 @@ Règles :
 pas de markdown, pas de guillemets."""
 
 
-def _comment(client: Anthropic, context: str, target_label: str, extra_instruction: str = "") -> str:
+def _local_text(system: str, user: str, max_tokens: int) -> str:
+    import local_llm
+
+    text = local_llm.chat(local_llm.writer_model(), [
+        {"role": "system", "content": system}, {"role": "user", "content": user},
+    ], max_tokens=max_tokens, temperature=0.9)
+    return text.strip().strip('"').strip("«»").strip()
+
+
+def _comment(client: Anthropic | None, context: str, target_label: str, extra_instruction: str = "",
+             mentions: list[str] | None = None) -> str:
+    user = f"{context}\n\nÉcris ton commentaire en réponse {target_label}, selon tes instructions."
+    if client is None:
+        text = _local_text(SYSTEM_PROMPT + extra_instruction, user, 220)
+        return finish_local(text, "jeune, sec, contrariant", mentions or [], HASHTAG_POOL.split(),
+                            want_hashtags=1)
     response = client.messages.create(
         model=MODEL,
         max_tokens=300,
@@ -59,11 +75,13 @@ def _comment(client: Anthropic, context: str, target_label: str, extra_instructi
 
 def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str, str]:
     """Return (comment_on_marc, comment_on_giselle) — two separate reply texts."""
-    api_key = os.getenv("CLAUDE_API_KEY")
-    if not api_key:
-        raise ValueError("CLAUDE_API_KEY not found in environment variables.")
-
-    client = Anthropic(api_key=api_key)
+    if use_local():
+        client = None
+    else:
+        api_key = os.getenv("CLAUDE_API_KEY")
+        if not api_key:
+            raise ValueError("CLAUDE_API_KEY not found in environment variables.")
+        client = Anthropic(api_key=api_key)
 
     context = (
         f"Post de Marc :\n{marc_post_text}\n\n"
@@ -80,6 +98,7 @@ def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str,
             f'une adresse directe), glisse "{GISELLE_HANDLE}" — obligatoire pour que X '
             "compte ça comme une vraie mention, mais ça doit passer inaperçu."
         ),
+        mentions=[GISELLE_HANDLE],
     )
 
     return comment_on_marc, comment_on_giselle
@@ -107,6 +126,9 @@ pas de markdown, pas de guillemets."""
 def generate_followup(giselle_text: str) -> str:
     """A short comment-section-style reply to Giselle's latest follow-up, for the
     optional extra back-and-forth rounds."""
+    if use_local():
+        text = _local_text(FOLLOWUP_SYSTEM_PROMPT, f"Giselle vient d'écrire :\n\n{giselle_text}\n\nRéponds-lui.", 160)
+        return finish_local(text, "jeune, sec, contrariant", [GISELLE_HANDLE], [])
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         raise ValueError("CLAUDE_API_KEY not found in environment variables.")

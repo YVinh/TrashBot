@@ -155,13 +155,43 @@ def _image_block(image_path: str) -> dict:
     }
 
 
+def _local_verdict(image_path: str, leaves: list[dict], menu: str) -> dict:
+    import local_llm
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "reportable": {"type": "boolean"},
+            "category_id": {"anyOf": [{"type": "integer", "enum": [c["id"] for c in leaves]}, {"type": "null"}]},
+            "description": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["reportable", "category_id", "description", "reason"],
+    }
+    try:
+        verdict, _ = local_llm.vision_json([
+            {"role": "system", "content": ASSESS_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": local_llm.image_data_url(image_path)}},
+                {"type": "text", "text": f"Catégories disponibles (id: chemin) :\n{menu}\n\nAnalyse la photo et réponds en JSON."},
+            ]},
+        ], schema, max_tokens=400)
+        return verdict
+    except local_llm.LocalLLMError as e:
+        raise FixMyStreetError(f"Modèle local indisponible : {e}") from e
+
+
 def assess(image_path: str) -> dict:
     """Sober look at the photo: reportable?, which category, what to write."""
+    import local_llm
+
+    leaves = cleanliness_categories()
+    menu = "\n".join(f"{c['id']}: {c['path']}" for c in leaves)
+    if local_llm.use_local():
+        return _check_verdict(_local_verdict(image_path, leaves, menu), leaves)
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         raise FixMyStreetError("CLAUDE_API_KEY manquante")
-    leaves = cleanliness_categories()
-    menu = "\n".join(f"{c['id']}: {c['path']}" for c in leaves)
     client = Anthropic(api_key=api_key)
     response = client.messages.create(
         model=MODEL,
@@ -181,6 +211,10 @@ def assess(image_path: str) -> dict:
         verdict = json.loads(text)
     except json.JSONDecodeError as e:
         raise FixMyStreetError(f"Réponse d'analyse illisible : {text[:120]}") from e
+    return _check_verdict(verdict, leaves)
+
+
+def _check_verdict(verdict: dict, leaves: list[dict]) -> dict:
     if verdict.get("reportable"):
         ids = {c["id"] for c in leaves}
         if verdict.get("category_id") not in ids:

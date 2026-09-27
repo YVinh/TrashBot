@@ -29,6 +29,7 @@ from telegram.ext import (
 
 import chain_state
 import feed_publisher
+import local_llm
 import feed_poller
 import fixmystreet
 from exif_extractor import extract_gps_coordinates
@@ -155,21 +156,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_path = tmp_dir / f"{tg_file.file_unique_id}{suffix}"
     await tg_file.download_to_drive(str(image_path))
 
-    status = await update.message.reply_text("🗑️ Looking at it...")
+    local = local_llm.use_local()
+    status = await update.message.reply_text(
+        "🗑️ Looking at it... (local model, usually 1–3 min)" if local else "🗑️ Looking at it..."
+    )
 
     submitter_is_owner = _is_owner(update)
     # Only an owner's caption reaches the LLM as a location hint. A
     # non-owner's caption is free text next to a prompt — exactly what
     # prompt injection needs — so it's dropped here rather than trusted.
     user_note = update.message.caption if submitter_is_owner else None
-
-    try:
-        caption = await asyncio.to_thread(generate_post_draft, str(image_path), user_note)
-    except Exception as e:
-        logger.exception("Agent failed to generate a draft")
-        await status.edit_text(f"❌ Couldn't generate a caption: {e}")
-        image_path.unlink(missing_ok=True)
-        return
 
     gps = extract_gps_coordinates(str(image_path))
     report_ok = (
@@ -178,13 +174,43 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         and update.effective_chat.type == "private"
         and gps is not None
     )
+    sender_name = update.effective_user.first_name or "someone"
+    notes = "" if submitter_is_owner else f"\n(from {sender_name} — only an owner can approve)"
+    if FMS_ENABLED and submitter_is_owner and update.effective_chat.type == "private" and gps is None:
+        notes += "\n(no GPS in this photo — send it as a File to be able to report it to FixMyStreet)"
 
     token = tg_file.file_unique_id
     PENDING[token] = {
-        "image_path": str(image_path), "caption": caption, "ts": time.time(), "gps": gps, "report_ok": report_ok,
+        "image_path": str(image_path), "caption": None, "ts": time.time(), "gps": gps, "report_ok": report_ok,
+        "user_note": user_note, "notes": notes,
     }
+    await _draft_and_show(status, token, None)
 
-    if report_ok:
+
+def _claude_available() -> bool:
+    return bool(os.getenv("CLAUDE_API_KEY"))
+
+
+async def _draft_and_show(message, token: str, backend: str | None):
+    """Generate a draft for PENDING[token] and put it (or the failure) on `message`."""
+    entry = PENDING[token]
+    retry_row = [InlineKeyboardButton("🔁 Retry with Claude", callback_data=f"claude:{token}")]
+    try:
+        draft = await asyncio.to_thread(generate_post_draft, entry["image_path"], entry["user_note"], backend)
+    except Exception as e:
+        logger.exception("Failed to generate a draft")
+        if backend != "anthropic" and local_llm.use_local() and _claude_available():
+            # Local failures never fall through to a paid model on their own — the owner decides.
+            rows = [retry_row, [InlineKeyboardButton("❌ Discard", callback_data=f"discard:{token}")]]
+            await message.edit_text(f"❌ Local model failed: {e}", reply_markup=InlineKeyboardMarkup(rows))
+            return
+        PENDING.pop(token, None)
+        await message.edit_text(f"❌ Couldn't generate a caption: {e}")
+        Path(entry["image_path"]).unlink(missing_ok=True)
+        return
+
+    entry["caption"] = draft.caption
+    if entry["report_ok"]:
         rows = [
             [InlineKeyboardButton("✅ Post + report to FixMyStreet", callback_data=f"postreport:{token}")],
             [
@@ -199,14 +225,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("❌ Discard", callback_data=f"discard:{token}"),
             ]
         ]
-    keyboard = InlineKeyboardMarkup(rows)
-    sender_name = update.effective_user.first_name or "someone"
-    owner_note = "" if submitter_is_owner else f"\n(from {sender_name} — only an owner can approve)"
-    fms_note = ""
-    if FMS_ENABLED and submitter_is_owner and update.effective_chat.type == "private" and gps is None:
-        fms_note = "\n(no GPS in this photo — send it as a File to be able to report it to FixMyStreet)"
-    await status.edit_text(
-        f"📝 Draft:\n\n{caption}\n\n({len(caption)} chars){owner_note}{fms_note}", reply_markup=keyboard
+    if draft.backend == "local" and _claude_available():
+        rows.append(retry_row)
+    warning = ""
+    if draft.belongings_warning:
+        warning = (f"⚠️ This may be someone's belongings (a person sleeping or living here?): "
+                   f"{draft.belongings_warning}\n\n")
+    source = (f"local model, seen by {draft.seen_by}" if draft.seen_by else "local model") \
+        if draft.backend == "local" else "Claude"
+    await message.edit_text(
+        f"{warning}📝 Draft ({source}):\n\n{draft.caption}\n\n({len(draft.caption)} chars){entry['notes']}",
+        reply_markup=InlineKeyboardMarkup(rows),
     )
 
 
@@ -224,9 +253,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     action, token = query.data.split(":", 1)
+    if action == "claude":
+        if token not in PENDING:
+            await query.edit_message_text("⌛ This draft expired or was already handled.")
+            return
+        await query.edit_message_text("🗑️ Asking Claude...")
+        await _draft_and_show(query.message, token, "anthropic")
+        return
+
     entry = PENDING.pop(token, None)
     if not entry:
         await query.edit_message_text("⌛ This draft expired or was already handled.")
+        return
+    if action != "discard" and not entry.get("caption"):
+        PENDING[token] = entry  # stale Post button on a failed draft: nothing to post
         return
 
     if action == "discard":
