@@ -19,7 +19,10 @@ owner's real name and email (FMS_REPORTER_*): a report to a public
 administration is not the place for a persona.
 
 Fail-soft: every failure raises FixMyStreetError with a readable message; the
-caller decides what to tell the owner. Nothing here ever blocks the X post."""
+caller decides what to tell the owner. Nothing here ever blocks the X post.
+
+Other chat members can report their own photos under their own details
+(fms_profiles.py): prepare() gives them a preview, submit(..., profile=) files it."""
 
 from __future__ import annotations
 
@@ -227,17 +230,24 @@ def _check_verdict(verdict: dict, leaves: list[dict]) -> dict:
 
 # -------------------------------------------------------------- submission
 
-def _reporter() -> dict:
-    name = os.getenv("FMS_REPORTER_NAME", "").strip()
-    email = os.getenv("FMS_REPORTER_EMAIL", "").strip()
-    if not name or not email:
-        raise FixMyStreetError("FMS_REPORTER_NAME / FMS_REPORTER_EMAIL manquants dans .env")
+def _reporter(profile: dict | None = None) -> dict:
+    """The owner's details from .env, or a chat member's own (fms_profiles)."""
+    if profile:
+        name, email, phone = profile.get("name", "").strip(), profile.get("email", "").strip(), profile.get("phone")
+        if not name or not email:
+            raise FixMyStreetError("Profil FixMyStreet incomplet")
+    else:
+        name = os.getenv("FMS_REPORTER_NAME", "").strip()
+        email = os.getenv("FMS_REPORTER_EMAIL", "").strip()
+        phone = os.getenv("FMS_REPORTER_PHONE")
+        if not name or not email:
+            raise FixMyStreetError("FMS_REPORTER_NAME / FMS_REPORTER_EMAIL manquants dans .env")
     return {
         "name": name,
         "actingAs": "RESIDENT",
         "contact": {
             "emailAddress": email,
-            "phoneNumber": os.getenv("FMS_REPORTER_PHONE") or None,
+            "phoneNumber": phone or None,
             "language": {"user": "fr", "address": "fr"},
         },
     }
@@ -253,10 +263,12 @@ def _upload_jpeg(image_path: str) -> bytes:
     return buf.getvalue()
 
 
-def submit(location: dict, category_id: int, description: str, image_path: str) -> dict:
-    """Create the incident with comment and photo, then ack it ("Send")."""
+def submit(location: dict, category_id: int, description: str, image_path: str,
+           profile: dict | None = None) -> dict:
+    """Create the incident with comment and photo, then ack it ("Send").
+    `profile` = a chat member's own details; None = the owner's (.env)."""
     s = _session()
-    reporter = _reporter()
+    reporter = _reporter(profile)
     notify = os.getenv("FMS_NOTIFY", "1") != "0"
 
     payload = {
@@ -304,24 +316,36 @@ def submit(location: dict, category_id: int, description: str, image_path: str) 
     return {"id": incident_id, "url": f"{BASE}/incidents/{incident_id}"}
 
 
+def prepare(image_path: str, lat: float, lon: float) -> dict:
+    """Assessment + address, nothing written: {"reportable": False, "reason"} or
+    {"reportable": True, "category_id", "category", "description", "address", "location"}."""
+    verdict = assess(image_path)
+    if not verdict.get("reportable"):
+        return {"reportable": False, "reason": verdict.get("reason", "")}
+    location = locate(lat, lon)
+    return {
+        "reportable": True,
+        "category_id": verdict["category_id"],
+        "category": verdict["category_path"],
+        "description": verdict["description"].strip(),
+        "address": location["label"],
+        "location": location,
+    }
+
+
 def report_trash(image_path: str, lat: float, lon: float, *, dry_run: bool = False) -> dict:
     """Whole flow. Returns {"filed": False, "reason": ...} when the photo
     doesn't warrant a report; with dry_run, {"filed": False, "dry_run": True,
     plus what would have been sent} without writing anything to the Region's
     system; else {"filed": True, "id", "url", "category", "description", "address"}."""
-    verdict = assess(image_path)
-    if not verdict.get("reportable"):
-        return {"filed": False, "reason": verdict.get("reason", "")}
-    location = locate(lat, lon)
-    details = {
-        "category_id": verdict["category_id"],
-        "category": verdict["category_path"],
-        "description": verdict["description"].strip(),
-        "address": location["label"],
-    }
+    details = prepare(image_path, lat, lon)
+    if not details.get("reportable"):
+        return {"filed": False, "reason": details.get("reason", "")}
+    location = details.pop("location")
+    details.pop("reportable")
     if dry_run:
         return {"filed": False, "dry_run": True, **details}
-    result = submit(location, verdict["category_id"], details["description"], image_path)
+    result = submit(location, details["category_id"], details["description"], image_path)
     return {"filed": True, **result, **details}
 
 

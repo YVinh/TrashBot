@@ -32,6 +32,7 @@ import feed_publisher
 import local_llm
 import feed_poller
 import fixmystreet
+import fms_profiles
 from exif_extractor import extract_gps_coordinates
 from trash_agent import generate_post_draft
 from twitter_poster import post_image_with_caption
@@ -60,15 +61,21 @@ OWNER_USER_IDS = {
 
 PENDING_TTL_SECONDS = 3600
 PENDING: dict[str, dict] = {}
+# Chat members' own FixMyStreet reports, keyed like PENDING but with their own
+# copy of the photo, so the owner posting/discarding the draft doesn't affect it.
+FMS_PENDING: dict[str, dict] = {}
 
 # How often to read public replies + engagement counts from X for the public
 # site. 0 (default) = never — reads cost X API credits, the bots' own posts
 # reach the site without any (see feed_publisher.py / feed_poller.py).
 FEED_POLL_HOURS = float(os.getenv("FEED_POLL_HOURS", "0") or 0)
 
-# FixMyStreet Brussels reports. Only offered for photos sent to the bot in a
-# private chat by an owner (never from the group) and only when the photo has
-# GPS. FMS_DRY_RUN=1 does everything except the final "send", for a first test.
+# FixMyStreet Brussels reports. The owner's own (in their name, from .env) are
+# only offered for photos sent to the bot in a private chat, with GPS. Other
+# chat members who send a photo as a File (so it keeps its GPS) are offered a
+# report under their OWN details (/fms_profile, see fms_profiles.py), with a
+# preview they confirm themselves — independent of whether the owner posts it.
+# FMS_DRY_RUN=1 does everything except the final "send", for a first test.
 FMS_ENABLED = os.getenv("FMS_ENABLED", "1") != "0"
 FMS_DRY_RUN = os.getenv("FMS_DRY_RUN", "0") == "1"
 FMS_STATUS_POLL_HOURS = float(os.getenv("FMS_STATUS_POLL_HOURS", "12") or 0)
@@ -120,9 +127,35 @@ def _cleanup_expired():
     for token in [t for t, e in PENDING.items() if now - e["ts"] > PENDING_TTL_SECONDS]:
         entry = PENDING.pop(token)
         Path(entry["image_path"]).unlink(missing_ok=True)
+    for token in [t for t, e in FMS_PENDING.items()
+                  if now - e["ts"] > PENDING_TTL_SECONDS and e["stage"] in ("offered", "previewed")]:
+        Path(FMS_PENDING.pop(token)["image_path"]).unlink(missing_ok=True)
+
+
+async def _is_member_of_allowed_chat(bot, user_id: int) -> bool:
+    """For commands in a private chat: is this person in one of the bot's chats?"""
+    for chat_id in ALLOWED_CHAT_IDS:
+        if chat_id == user_id:
+            return True
+        if chat_id > 0:
+            continue
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+        except Exception:
+            continue
+        if member.status in ("creator", "administrator", "member", "restricted"):
+            return True
+    return False
+
+
+def _fms_setup_link(bot) -> str:
+    return f"https://t.me/{bot.username}?start=fms"
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args and context.args[0] == "fms" and update.effective_chat.type == "private":
+        await _fms_profile_help(update, context)
+        return
     await update.message.reply_text(
         f"👋 I'm Marc.\n"
         f"chat_id: {update.effective_chat.id} (goes in ALLOWED_TELEGRAM_CHAT_IDS)\n"
@@ -180,11 +213,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         notes += "\n(no GPS in this photo — send it as a File to be able to report it to FixMyStreet)"
 
     token = tg_file.file_unique_id
+    if FMS_ENABLED and not submitter_is_owner:
+        await _offer_member_report(update, context, token, image_path, gps)
     PENDING[token] = {
         "image_path": str(image_path), "caption": None, "ts": time.time(), "gps": gps, "report_ok": report_ok,
         "user_note": user_note, "notes": notes,
     }
-    await _draft_and_show(status, token, None)
+    # In the background: drafting takes minutes on the local models, and updates are
+    # handled one at a time — button taps (e.g. a member's FixMyStreet report) mustn't wait.
+    context.application.create_task(_draft_and_show(status, token, None), update=update)
 
 
 def _claude_available() -> bool:
@@ -244,6 +281,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not _authorized(update):
         await query.answer()
+        return
+
+    if query.data.startswith("fmsu:"):
+        await _handle_member_report_callback(update, context)
         return
 
     if not _is_owner(update):
@@ -486,6 +527,201 @@ async def _report_to_fixmystreet(application: Application, chat_id: int, image_p
         Path(image_path).unlink(missing_ok=True)
 
 
+# ------------------------------------------------ chat members' own reports
+
+async def _offer_member_report(update: Update, context: ContextTypes.DEFAULT_TYPE, token: str,
+                               image_path: Path, gps):
+    """A non-owner sent a photo: offer them a FixMyStreet report in their own name
+    (with GPS), or tell them how to make that possible (without)."""
+    user = update.effective_user
+    profile = fms_profiles.get(user.id)
+    if gps is None:
+        if profile and update.message.document:
+            await update.message.reply_text("🏛️ No GPS in this file, so it can't be reported to FixMyStreet.")
+        elif profile:
+            await update.message.reply_text(
+                "🏛️ To report this to FixMyStreet, send it again as a File (📎 → File): "
+                "Telegram strips the location from photos.")
+        return
+    copy = image_path.with_name(image_path.stem + "-fmsu" + image_path.suffix)
+    shutil.copy2(image_path, copy)
+    rows = [[InlineKeyboardButton("📋 Prepare my report", callback_data=f"fmsu:prep:{token}"),
+             InlineKeyboardButton("No thanks", callback_data=f"fmsu:no:{token}")]]
+    if not profile:
+        rows.append([InlineKeyboardButton("🔐 Set up my details (private chat)", url=_fms_setup_link(context.bot))])
+    who = f"your saved details ({fms_profiles.masked(profile)})" if profile else \
+        "your own name and email (set them up once in a private chat with me)"
+    offer = await update.message.reply_text(
+        f"🏛️ {user.first_name}, want to report this spot to FixMyStreet Brussels yourself? "
+        f"It's filed under {who}. You'll see exactly what would be sent before anything goes out.",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+    FMS_PENDING[token] = {
+        "image_path": str(copy), "gps": gps, "user_id": user.id, "first_name": user.first_name,
+        "chat_id": offer.chat_id, "message_id": offer.message_id, "ts": time.time(), "stage": "offered",
+    }
+
+
+async def _handle_member_report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    _, action, token = query.data.split(":", 2)
+    entry = FMS_PENDING.get(token)
+    if not entry:
+        await query.answer("⌛ This expired or was already handled.", show_alert=True)
+        return
+    if query.from_user.id != entry["user_id"]:
+        await query.answer("Only the person who sent this photo can report it — under their own name.",
+                           show_alert=True)
+        return
+
+    if action == "no":
+        if entry["stage"] in ("preparing", "sending"):
+            await query.answer("Already in progress.")
+            return
+        FMS_PENDING.pop(token, None)
+        Path(entry["image_path"]).unlink(missing_ok=True)
+        await query.answer()
+        await query.edit_message_text("🏛️ OK — not reported to FixMyStreet.")
+        return
+
+    profile = fms_profiles.get(entry["user_id"])
+    if not profile:
+        await query.answer("First give me your name and email in a private chat — "
+                           "tap « Set up my details », then come back here.", show_alert=True)
+        return
+
+    if action == "prep" and entry["stage"] == "offered":
+        if fms_profiles.reports_today(entry["user_id"]) >= fms_profiles.daily_max():
+            await query.answer(f"You've reached today's limit of {fms_profiles.daily_max()} reports.",
+                               show_alert=True)
+            return
+        entry["stage"] = "preparing"
+        await query.answer()
+        await query.edit_message_text("🏛️ Preparing the report (looking at the photo, finding the address)…")
+        context.application.create_task(_prepare_member_report(context.application, token), update=update)
+    elif action == "send" and entry["stage"] == "previewed":
+        entry["stage"] = "sending"
+        await query.answer()
+        await query.edit_message_text("🏛️ Sending to FixMyStreet…")
+        context.application.create_task(_send_member_report(context.application, token, profile), update=update)
+    else:
+        await query.answer()
+
+
+async def _edit_member_report(application: Application, entry: dict, text: str, rows=None):
+    await application.bot.edit_message_text(
+        text, chat_id=entry["chat_id"], message_id=entry["message_id"],
+        reply_markup=InlineKeyboardMarkup(rows) if rows else None,
+    )
+
+
+def _drop_member_report(token: str):
+    entry = FMS_PENDING.pop(token, None)
+    if entry:
+        Path(entry["image_path"]).unlink(missing_ok=True)
+
+
+async def _prepare_member_report(application: Application, token: str):
+    entry = FMS_PENDING[token]
+    lat, lon = entry["gps"]
+    try:
+        details = await asyncio.to_thread(fixmystreet.prepare, entry["image_path"], lat, lon)
+    except Exception as e:
+        if not isinstance(e, fixmystreet.FixMyStreetError):
+            logger.exception("FixMyStreet member report: prepare failed")
+        _drop_member_report(token)
+        await _edit_member_report(application, entry, f"⚠️ Couldn't prepare the FixMyStreet report: {e}")
+        return
+    if not details["reportable"]:
+        _drop_member_report(token)
+        await _edit_member_report(application, entry,
+                                  f"🏛️ Doesn't look like something to report: {details['reason']}")
+        return
+    profile = fms_profiles.get(entry["user_id"]) or {}
+    entry.update(details=details, stage="previewed", ts=time.time())
+    test = "\n\n(test mode: nothing will actually be sent)" if FMS_DRY_RUN else ""
+    await _edit_member_report(
+        application, entry,
+        f"🏛️ Report for {entry['first_name']} — check it:\n{details['category']}\n{details['address']}\n"
+        f"« {details['description']} »\nFiled as: {fms_profiles.masked(profile)}{test}",
+        [[InlineKeyboardButton("✅ Send to FixMyStreet", callback_data=f"fmsu:send:{token}"),
+          InlineKeyboardButton("❌ Cancel", callback_data=f"fmsu:no:{token}")]],
+    )
+
+
+async def _send_member_report(application: Application, token: str, profile: dict):
+    entry = FMS_PENDING[token]
+    d = entry["details"]
+    try:
+        if FMS_DRY_RUN:
+            await _edit_member_report(application, entry,
+                                      f"🏛️ DRY RUN — would have reported for {entry['first_name']} (nothing sent):\n"
+                                      f"{d['category']}\n{d['address']}")
+            return
+        r = await asyncio.to_thread(fixmystreet.submit, d["location"], d["category_id"], d["description"],
+                                    entry["image_path"], profile)
+        fms_profiles.record_report(entry["user_id"])
+        await _edit_member_report(application, entry,
+                                  f"🏛️ Reported to FixMyStreet by {entry['first_name']}\n{d['category']}\n"
+                                  f"{d['address']}\n{r['url']}")
+    except Exception as e:
+        if not isinstance(e, fixmystreet.FixMyStreetError):
+            logger.exception("FixMyStreet member report: submit failed")
+        await _edit_member_report(application, entry, f"⚠️ FixMyStreet report failed: {e}")
+    finally:
+        _drop_member_report(token)
+
+
+async def _fms_profile_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    profile = fms_profiles.get(update.effective_user.id)
+    current = f"Saved now: {fms_profiles.masked(profile)}\n\n" if profile else ""
+    await update.message.reply_text(
+        "🏛️ FixMyStreet Brussels reports are filed in a real person's name. To report photos you send "
+        "(as a File, so the location is kept), give me your details once — they're only used for "
+        "reports you confirm yourself, and the Region/commune may email you about them.\n\n"
+        f"{current}{fms_profiles.USAGE}\n\n/fms_forget deletes them."
+    )
+
+
+async def handle_fms_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message, user = update.message, update.effective_user
+    if update.effective_chat.type != "private":
+        if context.args:
+            try:  # personal details typed into the group: take them down again
+                await message.delete()
+            except Exception:
+                pass
+        await context.bot.send_message(
+            update.effective_chat.id,
+            f"🔐 {user.first_name}, send your FixMyStreet details to me privately, not here: "
+            f"{_fms_setup_link(context.bot)}",
+        )
+        return
+    if not await _is_member_of_allowed_chat(context.bot, user.id):
+        await message.reply_text("⛔ This is only for members of the TrashBot chat.")
+        return
+    args = message.text.partition(" ")[2].strip()
+    if not args:
+        await _fms_profile_help(update, context)
+        return
+    try:
+        profile = fms_profiles.parse(args)
+    except fms_profiles.ProfileError as e:
+        await message.reply_text(f"⚠️ {e}")
+        return
+    fms_profiles.save(user.id, profile)
+    await message.reply_text(
+        f"✅ Saved: {fms_profiles.masked(profile)}\nNext time you send a photo as a File in the group, "
+        "you'll get a « Prepare my report » button. /fms_forget deletes your details."
+    )
+
+
+async def handle_fms_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    gone = fms_profiles.forget(update.effective_user.id)
+    await update.message.reply_text("🗑️ Your FixMyStreet details are deleted." if gone
+                                    else "Nothing saved for you.")
+
+
 async def _refresh_report_statuses_forever():
     while True:
         try:
@@ -555,6 +791,8 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(_resume_pending_chains).build()
     app.add_handler(CommandHandler("start", handle_start))
+    app.add_handler(CommandHandler("fms_profile", handle_fms_profile))
+    app.add_handler(CommandHandler("fms_forget", handle_fms_forget))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_error_handler(_handle_error)

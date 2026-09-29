@@ -314,6 +314,26 @@ whose status is refreshed from the public incident page every `FMS_STATUS_POLL_H
 Fail-soft: a failed report never touches the X chain — you get a ⚠️ instead. `FMS_DRY_RUN=1`
 runs the analysis and address lookup and tells you what it *would* file, writing nothing.
 
+### Reports by other chat members, in their own name
+
+Anyone else in an allowed chat who sends a photo **as a File** (so it keeps its GPS) gets a
+separate offer under their photo: **📋 Prepare my report** / **No thanks**. Only that person can
+tap it, and it's independent of the owner posting or discarding Marc's draft (it works on its own
+copy of the photo).
+
+1. Details first, once, in a **private chat** with the bot (the offer has a « Set up my details »
+   link; `/start fms` does the same): `/fms_profile Firstname Lastname; email; phone` (phone
+   optional). Only members of an allowed group can save details. Typed in the group instead, the
+   message is deleted (if the bot is an admin there) and they're pointed to the private chat.
+2. **Prepare** runs the same sober assessment + address lookup, writes nothing, and shows a
+   preview: category, address, description, "Filed as: Ann P., a…@example.be".
+3. **✅ Send to FixMyStreet** files it with *their* name/email/phone as the reporter, so the
+   Region's follow-up emails go to them. The link comes back in the chat.
+
+Details live in `fms_profiles.json` (mode 0600, git-ignored), keyed by Telegram user id;
+`/fms_forget` deletes them. At most `FMS_USER_DAILY_MAX` (default 5) reports per person per 24 h.
+`FMS_DRY_RUN=1` applies here too. Owners keep the flow above (their `.env` details, private chat).
+
 ## Supported Formats
 
 - JPEG (.jpg, .jpeg)
@@ -362,6 +382,7 @@ TrashBot/
 ├── feed_poller.py       # Optional: public replies + view counts from X for the site
 ├── link_preview.py      # Open Graph title/picture for Giselle's article links
 ├── fixmystreet.py       # Real reports to fixmystreet.brussels for approved photos
+├── fms_profiles.py      # Chat members' own FixMyStreet reporter details (0600, /fms_forget)
 ├── site/                # The public site (static: index.html, feed.json, media/)
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Template for environment variables

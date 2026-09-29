@@ -51,6 +51,8 @@ Thumbs.db
 # Bot runtime state (not code — pending reaction chains, resumed on restart)
 chain_state.json
 rss_used.json
+fms_profiles.json
+fms_profiles.tmp
 
 # Claude Code session files
 .claude/
