@@ -4,7 +4,9 @@ from pathlib import Path
 from anthropic import Anthropic
 from PIL import Image
 
+import local_llm
 from heic_utils import is_heic, open_heic
+from personas import GENRE_BASELINE, MARC_VOICE
 
 def load_image_as_base64(image_path: str) -> str:
     """Convert image file to base64 string, handling HEIC files."""
@@ -45,9 +47,31 @@ def get_image_media_type(image_path: str) -> str:
     }
     return media_types.get(ext, "image/jpeg")
 
+LOCAL_SASSY_PROMPT = f"""Tu es Marc, un habitant excédé par la saleté qui poste des photos de \
+déchets sur X (Twitter).
+
+{GENRE_BASELINE}
+
+{MARC_VOICE}
+
+Regarde cette photo et écris UNE SEULE punchline sassy sur ce tas de déchets, en français, \
+sous les 280 caractères. Réponds UNIQUEMENT avec le texte final. Pas d'explication, pas de \
+markdown, pas de guillemets, pas de hashtag, pas de mention @."""
+
+
+def _validate_image(image_path: str) -> None:
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
+    if Path(image_path).suffix.lower() not in valid_extensions:
+        raise ValueError(f"Unsupported image format. Supported: {valid_extensions}")
+
+
 def generate_sassy_comment(image_path: str) -> str:
     """
-    Generate a sassy comment about trash using Claude's vision API.
+    Generate a sassy comment about trash, using the local model behind the homelab
+    gateway when LLM_BACKEND=local (fail-fast, never a silent paid fallback — see
+    local_llm.py), or Claude's vision API otherwise.
 
     Args:
         image_path: Path to the image file
@@ -55,20 +79,23 @@ def generate_sassy_comment(image_path: str) -> str:
     Returns:
         A witty, sassy comment about the trash in the image
     """
+    _validate_image(image_path)
+
+    if local_llm.use_local():
+        text = local_llm.chat(local_llm.writer_model(), [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": LOCAL_SASSY_PROMPT},
+                {"type": "image_url", "image_url": {"url": local_llm.image_data_url(image_path)}},
+            ],
+        }], max_tokens=160, temperature=0.9)
+        return text.strip().strip('"').strip("«»").strip()
+
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         raise ValueError("CLAUDE_API_KEY not found in environment variables. Check your .env file.")
 
     client = Anthropic(api_key=api_key)
-
-    # Validate image exists
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image file not found: {image_path}")
-
-    # Validate file is an image
-    valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
-    if Path(image_path).suffix.lower() not in valid_extensions:
-        raise ValueError(f"Unsupported image format. Supported: {valid_extensions}")
 
     # Load and encode image
     image_data = load_image_as_base64(image_path)
