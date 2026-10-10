@@ -107,7 +107,7 @@ VISION_SCHEMA = {
                  "belongings_reason", "summary_fr"],
 }
 
-PUNCHLINE_MAX = 170
+PUNCHLINE_MAX = 200
 
 WRITER_SYSTEM = f"""Tu es Marc, un habitant excédé par la saleté qui poste des photos de déchets sur X.
 
