@@ -27,10 +27,10 @@ VISION_EDGE = 640  # the app caps images at ~0.5 MP
 # Swappable: set PHONE_VISION_PROMPT in .env (use \n for newlines) to drop in a better prompt.
 DEFAULT_VISION_PROMPT = (
     "Look at this photo of litter on a street. Answer in exactly 4 lines, nothing else:\n"
-    "ITEMS: the discarded objects, comma-separated, short English nouns with colour or material\n"
+    "ITEMS: ...\n"
     "AMOUNT: one of: single item / a few items / a pile\n"
-    "PLACE: where they lie, a few words\n"
-    "SUMMARY_FR: one French sentence describing the scene"
+    "PLACE: ...\n"
+    "SUMMARY_FR: one French sentence"
 )
 
 MARC_SYSTEM = ("Tu es Marc, retraité désabusé qui rage contre la saleté à Bruxelles. On te donne la description "
@@ -122,13 +122,22 @@ def parse_description(text: str) -> dict:
             "ironic_details": ironic, "summary_fr": summary}
 
 
+VISION_TRIES = 2
+
+
 def describe_photo(image_path: str) -> dict:
     """Vision step (swappable): photo in, facts out. Caller holds the phone lock."""
-    text = _chat(VISION_MODEL, [{"role": "user", "content": [
-        {"type": "text", "text": vision_prompt()},
-        {"type": "image_url", "image_url": {"url": image_data_url(image_path)}},
-    ]}], max_tokens=300, temperature=0.2, timeout=float(os.getenv("PHONE_VISION_TIMEOUT", "240")))
-    return parse_description(text)
+    content = [{"type": "text", "text": vision_prompt()},
+               {"type": "image_url", "image_url": {"url": image_data_url(image_path)}}]
+    last = None
+    for _ in range(VISION_TRIES):
+        text = _chat(VISION_MODEL, [{"role": "user", "content": content}], max_tokens=300, temperature=0.2,
+                     timeout=float(os.getenv("PHONE_VISION_TIMEOUT", "240")))
+        try:
+            return parse_description(text)
+        except PhoneError as e:
+            last = e
+    raise last
 
 
 def bad_punchline(text: str) -> str | None:
