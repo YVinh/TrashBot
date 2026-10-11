@@ -76,6 +76,7 @@ FEED_POLL_HOURS = float(os.getenv("FEED_POLL_HOURS", "0") or 0)
 # report under their OWN details (/fms_profile, see fms_profiles.py), with a
 # preview they confirm themselves — independent of whether the owner posts it.
 # FMS_DRY_RUN=1 does everything except the final "send", for a first test.
+CHAIN_ENABLED = os.getenv("CHAIN_ENABLED", "1") != "0"  # 0 = Giselle/Yousuf replies off
 FMS_ENABLED = os.getenv("FMS_ENABLED", "1") != "0"
 FMS_DRY_RUN = os.getenv("FMS_DRY_RUN", "0") == "1"
 FMS_STATUS_POLL_HOURS = float(os.getenv("FMS_STATUS_POLL_HOURS", "12") or 0)
@@ -361,6 +362,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "marc_tweet_id": result["post_id"],
         "marc_text": entry["caption"],
     }
+    if not CHAIN_ENABLED:
+        return
     chain_state.save_chain(result["post_id"], initial_state)
     context.application.create_task(
         _chain_giselle_and_yousuf(context.application, initial_state),
@@ -747,7 +750,7 @@ async def _resume_pending_chains(application: Application):
     # would just warn. Our own chain_state.json persistence is what actually
     # makes this resilient to interruption, not PTB's task supervision.
     pending = chain_state.load_pending_chains()
-    for state in pending:
+    for state in pending if CHAIN_ENABLED else []:
         logger.info(
             "Resuming interrupted reaction chain for tweet %s (stage=%s)",
             state["marc_tweet_id"],

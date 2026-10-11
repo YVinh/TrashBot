@@ -179,6 +179,10 @@ def assemble(punchline: str, tags: str) -> str:
 
 
 def _local_draft(image_path: str, user_note: str | None) -> Draft:
+    if os.getenv("MARC_WRITER", "").strip().lower() == "phone":
+        import phone_marc  # Marc runs on the owner's iPhone; Giselle/Yousuf stay on the gateway
+        punchline, facts = phone_marc.marc_for_photo(image_path)
+        return Draft(assemble(punchline, tag_line(image_path)), "local", None, "iPhone (Marc v4)", facts)
     facts = see(image_path)
     caption = assemble(write_punchline(facts, user_note), tag_line(image_path))
     warning = (facts.get("belongings_reason") or "flagged") if facts.get("possibly_someones_belongings") else None
