@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -20,18 +21,12 @@ from PIL import Image, ImageOps
 from heic_utils import is_heic, open_heic
 
 DEFAULT_URL = "http://192.168.178.183:8080"
-VISION_MODEL = "mlx-community/Qwen3-VL-4B-Instruct-4bit"
-MARC_MODEL = "local/marc-v4-step200"
+VISION_MODEL = "local/vision-4b-ft1242"
+MARC_BASE = "mlx-community/Qwen3.5-4B-4bit"
+MARC_ADAPTER = "marc"
 VISION_EDGE = 640  # the app caps images at ~0.5 MP
-
-# Swappable: set PHONE_VISION_PROMPT in .env (use \n for newlines) to drop in a better prompt.
-DEFAULT_VISION_PROMPT = (
-    "Look at this photo of litter on a street. Answer in exactly 4 lines, nothing else:\n"
-    "ITEMS: ...\n"
-    "AMOUNT: one of: single item / a few items / a pile\n"
-    "PLACE: ...\n"
-    "SUMMARY_FR: one French sentence"
-)
+MIN_FREE_MB = 2000
+FREE_WAIT_S = 90
 
 MARC_SYSTEM = ("Tu es Marc, retraité désabusé qui rage contre la saleté à Bruxelles. On te donne la description "
                "d'une photo. Écris UNE punchline en français, 200 caractères maximum, sans hashtag, sans @, sans lien.")
@@ -50,7 +45,16 @@ def _url() -> str:
 
 
 def vision_prompt() -> str:
-    return os.getenv("PHONE_VISION_PROMPT", "").replace("\\n", "\n").strip() or DEFAULT_VISION_PROMPT
+    """The prompt the vision model was tuned on, word for word: from PHONE_VISION_PROMPT_FILE (preferred)."""
+    path = os.getenv("PHONE_VISION_PROMPT_FILE", "").strip()
+    if path:
+        try:
+            text = open(path, encoding="utf-8").read().strip()
+        except OSError as e:
+            raise PhoneError(f"cannot read the vision prompt file {path}: {e.strerror}") from e
+        if text:
+            return text
+    raise PhoneError("the tuned vision prompt is not installed (set PHONE_VISION_PROMPT_FILE in the bot's .env)")
 
 
 def _token() -> str:
@@ -78,15 +82,24 @@ def _request(path: str, payload: dict | None, timeout: float) -> dict:
 
 
 def check_health() -> dict:
-    h = _request("/health", None, timeout=float(os.getenv("PHONE_HEALTH_TIMEOUT", "6")))
-    if h.get("status") != "ok":
-        raise PhoneError(f"the phone is not ready (status {h.get('status')!r})")
-    return h
+    """Phone must be ok and have >= MIN_FREE_MB free; waits up to FREE_WAIT_S for memory to come back."""
+    deadline = time.monotonic() + FREE_WAIT_S
+    while True:
+        h = _request("/health", None, timeout=float(os.getenv("PHONE_HEALTH_TIMEOUT", "6")))
+        if h.get("status") != "ok":
+            raise PhoneError(f"the phone is not ready (status {h.get('status')!r})")
+        free = h.get("free_memory_mb")
+        if not isinstance(free, (int, float)) or free >= MIN_FREE_MB:
+            return h
+        if time.monotonic() >= deadline:
+            raise PhoneError(f"the phone is low on memory ({int(free)} MB free, needs {MIN_FREE_MB}); try again in a minute")
+        time.sleep(5)
 
 
-def _chat(model: str, messages: list[dict], *, max_tokens: int, temperature: float, timeout: float) -> str:
+def _chat(model: str, messages: list[dict], *, max_tokens: int, temperature: float, timeout: float,
+          extra: dict | None = None) -> str:
     data = _request("/v1/chat/completions", {"model": model, "messages": messages, "max_tokens": max_tokens,
-                                              "temperature": temperature}, timeout)
+                                              "temperature": temperature, **(extra or {})}, timeout)
     try:
         return (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError) as e:
@@ -106,20 +119,28 @@ _AMOUNTS = ("single item", "a few items", "a pile")
 
 
 def parse_description(text: str) -> dict:
-    """KEY: value lines -> the facts JSON Marc was trained on. Raises PhoneError if unusable."""
-    fields: dict[str, str] = {}
-    for line in text.splitlines():
-        m = re.match(r"\s*[-*]?\s*\**(ITEMS|AMOUNT|PLACE|SUMMARY_FR|IRONIC(?:_DETAILS)?)\**\s*:\s*(.+)", line, re.I)
-        if m:
-            fields.setdefault(m.group(1).upper().replace("_DETAILS", ""), m.group(2).strip())
-    items = [i.strip(" .") for i in re.split(r"[,;]", fields.get("ITEMS", "")) if i.strip(" .")]
-    summary = fields.get("SUMMARY_FR", "")
+    """The vision model answers JSON (items, amount, place, ironic_details, summary_fr). Raises PhoneError if unusable."""
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        d = json.loads(m.group(0)) if m else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict):
+        raise PhoneError(f"the phone's photo description was unusable: {text[:150]!r}")
+
+    def strs(v) -> list[str]:
+        if isinstance(v, str):
+            v = [v]
+        return [str(i).strip() for i in v if str(i).strip()] if isinstance(v, list) else []
+
+    items = strs(d.get("items"))
+    summary = str(d.get("summary_fr") or "").strip()
     if not items or not summary:
         raise PhoneError(f"the phone's photo description was unusable: {text[:150]!r}")
-    amount = next((a for a in _AMOUNTS if a in fields.get("AMOUNT", "").lower()), "a few items")
-    ironic = [i.strip() for i in re.split(r"[;|]", fields.get("IRONIC", "")) if i.strip() and i.strip().lower() != "none"]
-    return {"items": items, "amount": amount, "place": fields.get("PLACE", "").strip(" ."),
-            "ironic_details": ironic, "summary_fr": summary}
+    amount = str(d.get("amount") or "").strip()
+    return {"items": items, "amount": amount if amount in _AMOUNTS else "a few items",
+            "place": str(d.get("place") or "").strip(" ."), "ironic_details": strs(d.get("ironic_details")),
+            "summary_fr": summary}
 
 
 VISION_TRIES = 2
@@ -131,7 +152,7 @@ def describe_photo(image_path: str) -> dict:
                {"type": "image_url", "image_url": {"url": image_data_url(image_path)}}]
     last = None
     for _ in range(VISION_TRIES):
-        text = _chat(VISION_MODEL, [{"role": "user", "content": content}], max_tokens=300, temperature=0.2,
+        text = _chat(VISION_MODEL, [{"role": "user", "content": content}], max_tokens=320, temperature=0.4,
                      timeout=float(os.getenv("PHONE_VISION_TIMEOUT", "240")))
         try:
             return parse_description(text)
@@ -156,8 +177,8 @@ def write_marc(facts: dict) -> str:
         {k: facts.get(k) for k in ("items", "amount", "place", "ironic_details", "summary_fr")}, ensure_ascii=False)
     problems = []
     for _ in range(MARC_TRIES):
-        text = _chat(MARC_MODEL, [{"role": "system", "content": MARC_SYSTEM}, {"role": "user", "content": user}],
-                     max_tokens=80, temperature=0.7, timeout=float(os.getenv("PHONE_MARC_TIMEOUT", "180")))
+        text = _chat(MARC_BASE, [{"role": "system", "content": MARC_SYSTEM}, {"role": "user", "content": user}],
+                     max_tokens=80, temperature=0.7, extra={"adapter": MARC_ADAPTER, "enable_thinking": False}, timeout=float(os.getenv("PHONE_MARC_TIMEOUT", "180")))
         text = text.strip().strip('"').strip("«»").strip()
         why = bad_punchline(text)
         if not why:
