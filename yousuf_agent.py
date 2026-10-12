@@ -151,10 +151,24 @@ Reste sous les 280 caractères. Réponds UNIQUEMENT avec le texte final. Pas d'e
 pas de markdown, pas de guillemets."""
 
 
-def generate_followup(giselle_text: str) -> str:
+def generate_followup(giselle_text: str, marc_text: str = "") -> str:
     """A short comment-section-style reply to Giselle's latest follow-up, for the
-    optional extra back-and-forth rounds."""
+    optional extra back-and-forth rounds.
+
+    Phone path (LLM_BACKEND=local + HOUSENODE_TOKEN, homelab#112): the trained shape "Post de Marc +
+    Réponse de Giselle" with her latest text, so `marc_text` is required; errors raise LocalLLMError,
+    no gateway or paid fallback. Off => the old writer path, unchanged."""
     if use_local():
+        import local_llm
+
+        adapter = local_llm.housenode_adapter("yousuf")
+        if adapter:
+            if not marc_text:
+                raise local_llm.LocalLLMError("yousuf follow-up needs marc_text for the trained prompt")
+            user = (f"Post de Marc :\n{marc_text}\n\nRéponse de Giselle à ce post :\n{giselle_text}\n\n"
+                    "Écris ton commentaire en réponse à la réponse de Giselle, selon tes instructions.")
+            text = _phone_text(adapter, user)  # the @mention only from code, below
+            return finish_local(text, "jeune, sec, contrariant", [GISELLE_HANDLE], [])
         text = _local_text(FOLLOWUP_SYSTEM_PROMPT, f"Giselle vient d'écrire :\n\n{giselle_text}\n\nRéponds-lui.", 160)
         return finish_local(text, "jeune, sec, contrariant", [GISELLE_HANDLE], [])
     api_key = os.getenv("CLAUDE_API_KEY")

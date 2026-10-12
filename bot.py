@@ -88,7 +88,17 @@ MAX_REACTION_DELAY = 3600  # 60 min
 # After Giselle's initial reaction and Yousuf's two comments, they may keep
 # bickering with each other a bit more — never guaranteed, capped so it can't
 # run forever.
-MAX_EXTRA_ROUNDS = 2
+DEFAULT_EXTRA_ROUNDS = 2
+
+
+def max_extra_rounds() -> int:
+    """EXTRA_ROUNDS from the environment (default 2); 0 switches the back-and-forth off. Read at call time."""
+    try:
+        return max(0, int(os.getenv("EXTRA_ROUNDS", str(DEFAULT_EXTRA_ROUNDS))))
+    except ValueError:
+        return DEFAULT_EXTRA_ROUNDS
+
+
 EXTRA_ROUND_CONTINUE_CHANCE = 0.5
 
 
@@ -371,7 +381,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _chain_giselle_and_yousuf(application: Application, state: dict):
     """Giselle reacts, then Yousuf comments on both, each after a random delay.
     Then Giselle and Yousuf may keep bickering at each other for up to
-    MAX_EXTRA_ROUNDS more replies. Fully autonomous — errors are reported to
+    max_extra_rounds() more replies (env EXTRA_ROUNDS, default 2). Fully autonomous — errors are reported to
     chat. Progress is persisted after every stage (see chain_state.py) so a
     bot restart resumes from the last completed stage instead of losing the
     rest of the chain."""
@@ -450,22 +460,22 @@ async def _chain_giselle_and_yousuf(application: Application, state: dict):
         chain_state.save_chain(marc_tweet_id, state)
 
     # pending_extra: alternates Giselle/Yousuf, each replying to the other's
-    # last message, for up to MAX_EXTRA_ROUNDS more (randomly continued).
+    # last message, for up to max_extra_rounds() more (randomly continued).
     last_speaker = state["last_speaker"]
     last_text = state["last_text"]
     last_reply_id = state["last_reply_id"]
     extra_round = state["extra_round"]
 
-    while extra_round < MAX_EXTRA_ROUNDS:
+    while extra_round < max_extra_rounds():
         if random.random() > EXTRA_ROUND_CONTINUE_CHANCE:
             break
         await _wait_a_bit()
         try:
             if last_speaker == "YOUSUF":
-                text = await asyncio.to_thread(giselle_followup, last_text)
+                text = await asyncio.to_thread(giselle_followup, last_text, marc_text)
                 account, emoji = "GISELLE", "🗯️"
             else:
-                text = await asyncio.to_thread(yousuf_followup, last_text)
+                text = await asyncio.to_thread(yousuf_followup, last_text, marc_text)
                 account, emoji = "YOUSUF", "🙃"
             result = await asyncio.to_thread(post_reply, account, last_reply_id, text)
             await bot.send_message(chat_id, f"{emoji} {account.title()}: {result['post_url']}")
