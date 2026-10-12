@@ -419,3 +419,6 @@ Having issues? Check the Troubleshooting section above or open an issue on GitHu
 ---
 
 **Made with ❤️ to fight trash, one post at a time.** 🗑️✨
+
+## Giselle on the iPhone House Node (optional, homelab#111)
+With `LLM_BACKEND=local`, Giselle's reaction is written by the `giselle` LoRA adapter on the phone (stock Qwen3.5-4B-4bit + adapter, `enable_thinking: false`, temperature 0.7, max 80 tokens) when `HOUSENODE_TOKEN` is set in `.env` (also `HOUSENODE_URL`, default `http://192.168.178.183:8080`; `GISELLE_ADAPTER=` empty switches it off). The prompt and the "Post de Marc / Article (dd/mm) / Pas d'article cette fois." user format are exactly the training format; the article still comes from `news_rss` in code, tags, @yousuf and the link are appended by code. If the phone is unreachable the old gateway writer model answers as before.

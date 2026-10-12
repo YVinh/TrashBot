@@ -120,6 +120,42 @@ def chat(model: str, messages: list[dict], *, max_tokens: int = 400, temperature
     return text
 
 
+HOUSENODE_BASE_MODEL = "mlx-community/Qwen3.5-4B-4bit"
+
+
+def housenode_adapter(persona: str) -> str:
+    """Adapter name for a persona on the iPhone House Node, or "" when the phone path is off.
+    Needs HOUSENODE_TOKEN (never in the repo); GISELLE_ADAPTER="" switches the phone path off."""
+    if not os.getenv("HOUSENODE_TOKEN"):
+        return ""
+    return os.getenv(f"{persona.upper()}_ADAPTER", persona).strip()
+
+
+def housenode_chat(adapter: str, messages: list[dict], *, max_tokens: int = 80, temperature: float = 0.7,
+                   timeout: int = 180) -> str:
+    """Stock Qwen3.5-4B-4bit + run-time LoRA adapter on the phone (OpenAI-style, bearer token).
+    enable_thinking is off (the stock template would think first). Raises LocalLLMError like chat()."""
+    url = os.getenv("HOUSENODE_URL", "http://192.168.178.183:8080").rstrip("/")
+    token = os.getenv("HOUSENODE_TOKEN")
+    if not token:
+        raise LocalLLMError("HOUSENODE_TOKEN missing in .env")
+    payload = {"model": HOUSENODE_BASE_MODEL, "adapter": adapter, "enable_thinking": False,
+               "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+    req = urllib.request.Request(url + "/v1/chat/completions", data=json.dumps(payload).encode(),
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+        text = (data["choices"][0]["message"]["content"] or "").strip()
+    except urllib.error.HTTPError as e:
+        raise LocalLLMError(f"house node {e.code} for adapter {adapter}: {e.read().decode(errors='replace')[:200]}") from e
+    except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as e:
+        raise LocalLLMError(f"house node adapter {adapter} failed: {e}") from e
+    if not text or "<think>" in text:
+        raise LocalLLMError(f"house node adapter {adapter} returned no usable text")
+    return text
+
+
 def chat_json(model: str, messages: list[dict], schema: dict, **kw) -> dict:
     text = chat(model, messages, schema=schema, temperature=kw.pop("temperature", 0.1), **kw)
     obj = _first_json_object(text)
