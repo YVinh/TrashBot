@@ -39,6 +39,22 @@ Règles :
 pas de markdown, pas de guillemets."""
 
 
+# EXACT system prompt of the Yousuf LoRA training set (homelab#112, ~/trashbot-writer/yousuf_train/dataset).
+# The adapter was trained only with this prompt and the two user shapes built in generate_comments; do not reword.
+TRAINING_SYSTEM_PROMPT = (
+    "Tu es Yousuf, jeune, sec et sarcastique, sur la saleté à Bruxelles. On te donne le post de Marc et parfois la "
+    "réaction de Giselle. Écris UN commentaire en français, 180 caractères maximum, sans hashtag, sans @, sans lien.")
+
+
+def _phone_text(adapter: str, user: str) -> str:
+    """One comment from the phone adapter. LocalLLMError propagates: no gateway, no paid fallback."""
+    import local_llm
+
+    text = local_llm.housenode_chat(adapter, [
+        {"role": "system", "content": TRAINING_SYSTEM_PROMPT}, {"role": "user", "content": user}])
+    return text.strip().strip('"').strip("«»").strip()
+
+
 def _local_text(system: str, user: str, max_tokens: int) -> str:
     import local_llm
 
@@ -49,8 +65,12 @@ def _local_text(system: str, user: str, max_tokens: int) -> str:
 
 
 def _comment(client: Anthropic | None, context: str, target_label: str, extra_instruction: str = "",
-             mentions: list[str] | None = None) -> str:
+             mentions: list[str] | None = None, phone_adapter: str = "") -> str:
     user = f"{context}\n\nÉcris ton commentaire en réponse {target_label}, selon tes instructions."
+    if client is None and phone_adapter:
+        text = _phone_text(phone_adapter, user)  # hashtag + @mention only from code, below
+        return finish_local(text, "jeune, sec, contrariant", mentions or [], HASHTAG_POOL.split(),
+                            want_hashtags=1)
     if client is None:
         text = _local_text(SYSTEM_PROMPT + extra_instruction, user, 220)
         return finish_local(text, "jeune, sec, contrariant", mentions or [], HASHTAG_POOL.split(),
@@ -83,12 +103,19 @@ def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str,
             raise ValueError("CLAUDE_API_KEY not found in environment variables.")
         client = Anthropic(api_key=api_key)
 
+    import local_llm
+
+    # Phone adapter (LLM_BACKEND=local + HOUSENODE_TOKEN): the two training shapes. Marc's comment sees
+    # Marc only; the comment on Giselle sees Marc + her reaction. Off => the old writer path, unchanged.
+    adapter = local_llm.housenode_adapter("yousuf") if client is None else ""
+    marc_only = f"Post de Marc :\n{marc_post_text}"
     context = (
         f"Post de Marc :\n{marc_post_text}\n\n"
         f"Réponse de Giselle à ce post :\n{giselle_post_text}"
     )
 
-    comment_on_marc = _comment(client, context, "au post original de Marc")
+    comment_on_marc = _comment(client, marc_only if adapter else context, "au post original de Marc",
+                               phone_adapter=adapter)
     comment_on_giselle = _comment(
         client,
         context,
@@ -99,6 +126,7 @@ def generate_comments(marc_post_text: str, giselle_post_text: str) -> tuple[str,
             "compte ça comme une vraie mention, mais ça doit passer inaperçu."
         ),
         mentions=[GISELLE_HANDLE],
+        phone_adapter=adapter,
     )
 
     return comment_on_marc, comment_on_giselle
