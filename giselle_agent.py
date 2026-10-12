@@ -186,12 +186,26 @@ Reste sous les 280 caractères. Réponds UNIQUEMENT avec le texte final. Pas d'e
 pas de markdown, pas de guillemets."""
 
 
-def generate_followup(yousuf_text: str) -> str:
+def generate_followup(yousuf_text: str, marc_text: str = "") -> str:
     """A short comment-section-style reply to Yousuf's latest comment, for the
-    optional extra back-and-forth rounds. No web search, no source, no hashtags."""
+    optional extra back-and-forth rounds. No web search, no source, no hashtags.
+
+    Phone path (LLM_BACKEND=local + HOUSENODE_TOKEN, homelab#112): her adapter was never trained on
+    replying to Yousuf, so it gets the closest trained shape, the Marc post + "Pas d'article cette
+    fois." (`yousuf_text` is deliberately not sent: she reacts to the situation, not to him). Needs
+    `marc_text`; errors raise LocalLLMError, no gateway or paid fallback. Off => old writer path."""
     if use_local():
         import local_llm
 
+        adapter = local_llm.housenode_adapter("giselle")
+        if adapter:
+            if not marc_text:
+                raise local_llm.LocalLLMError("giselle follow-up needs marc_text for the trained prompt")
+            text = local_llm.housenode_chat(adapter, [
+                {"role": "system", "content": TRAINING_SYSTEM_PROMPT},
+                {"role": "user", "content": _training_user(marc_text, None)}])
+            text = text.strip().strip('"').strip("«»").strip()
+            return finish_local(text, "moralisatrice, remarque courte", [YOUSUF_HANDLE], [])
         text = local_llm.chat(local_llm.writer_model(), [
             {"role": "system", "content": FOLLOWUP_SYSTEM_PROMPT},
             {"role": "user", "content": f"Yousuf vient d'écrire :\n\n{yousuf_text}\n\nRéponds-lui."},
