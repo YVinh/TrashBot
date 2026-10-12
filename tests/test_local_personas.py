@@ -113,3 +113,71 @@ def test_moderation_local_fails_closed(local, monkeypatch):
     assert feed_poller.fit_to_show("hello") is False
     monkeypatch.setattr(local_llm, "chat", lambda *a, **k: "SHOW")
     assert feed_poller.fit_to_show("hello") is True
+
+
+# --- Giselle on the iPhone House Node (adapter "giselle", homelab#111) ---
+TRAIN_SYSTEM = ("Tu es Giselle, moralisatrice et scandalisée par la saleté à Bruxelles. On te donne le post de Marc et parfois un "
+                "article. Écris UNE réaction en français, 180 caractères maximum, sans hashtag, sans @, sans lien.")
+
+
+def test_giselle_phone_path_uses_training_prompt_and_format(local, monkeypatch):
+    article = {"title": "Encombrants", "summary": "Collecte gratuite.", "link": "https://www.dhnet.be/a",
+               "published": NOW, "site": "dhnet.be"}
+    monkeypatch.setattr(news_rss, "pick_article", lambda: article)
+    monkeypatch.setenv("HOUSENODE_TOKEN", "test-token-not-real")
+    seen = {}
+    def fake(adapter, messages, **kw):
+        seen.update(adapter=adapter, messages=messages, kw=kw)
+        return "Quel drame pour le quartier !! https://fake.example"
+    monkeypatch.setattr(local_llm, "housenode_chat", fake)
+    monkeypatch.setattr(local_llm, "chat", lambda *a, **k: pytest.fail("gateway must not be used when the phone answers"))
+    out = giselle_agent.generate_reaction("encore des crasses")
+    assert seen["adapter"] == "giselle"
+    assert seen["messages"][0] == {"role": "system", "content": TRAIN_SYSTEM}
+    assert seen["messages"][1]["content"] == ("Post de Marc :\nencore des crasses\n\n"
+                                              "Article (26/09) : Encombrants\nCollecte gratuite.")
+    assert out.endswith("\nhttps://www.dhnet.be/a") and "fake.example" not in out and YOUSUF in out
+
+
+def test_giselle_phone_without_article_uses_the_no_article_line(local, monkeypatch):
+    monkeypatch.setattr(news_rss, "pick_article", lambda: None)
+    monkeypatch.setenv("HOUSENODE_TOKEN", "test-token-not-real")
+    seen = {}
+    monkeypatch.setattr(local_llm, "housenode_chat", lambda a, m, **k: seen.setdefault("m", m) and "Quel drame !!")
+    giselle_agent.generate_reaction("encore des crasses")
+    assert seen["m"][1]["content"] == "Post de Marc :\nencore des crasses\n\nPas d'article cette fois."
+
+
+def test_giselle_phone_failure_falls_back_to_the_gateway_writer(local, monkeypatch):
+    monkeypatch.setattr(news_rss, "pick_article", lambda: None)
+    monkeypatch.setenv("HOUSENODE_TOKEN", "test-token-not-real")
+    def boom(*a, **k): raise local_llm.LocalLLMError("phone away")
+    monkeypatch.setattr(local_llm, "housenode_chat", boom)
+    monkeypatch.setattr(local_llm, "chat", lambda *a, **k: "Quel drame, où va-t-on !")
+    assert "Quel drame" in giselle_agent.generate_reaction("encore des crasses")
+
+
+def test_giselle_phone_path_is_off_without_token_or_when_disabled(local, monkeypatch):
+    monkeypatch.delenv("HOUSENODE_TOKEN", raising=False)
+    assert local_llm.housenode_adapter("giselle") == ""
+    monkeypatch.setenv("HOUSENODE_TOKEN", "x")
+    monkeypatch.setenv("GISELLE_ADAPTER", "")
+    assert local_llm.housenode_adapter("giselle") == ""
+
+
+def test_housenode_chat_request_shape(monkeypatch):
+    import io, json
+    monkeypatch.setenv("HOUSENODE_TOKEN", "test-token-not-real")
+    sent = {}
+    class R(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    def fake_open(req, timeout):
+        sent["body"] = json.loads(req.data); sent["auth"] = req.get_header("Authorization"); sent["url"] = req.full_url
+        return R(json.dumps({"choices": [{"message": {"content": " ok "}}]}).encode())
+    monkeypatch.setattr(local_llm.urllib.request, "urlopen", fake_open)
+    assert local_llm.housenode_chat("giselle", [{"role": "user", "content": "x"}]) == "ok"
+    b = sent["body"]
+    assert b["adapter"] == "giselle" and b["enable_thinking"] is False and b["max_tokens"] == 80 and b["temperature"] == 0.7
+    assert b["model"] == "mlx-community/Qwen3.5-4B-4bit" and sent["auth"] == "Bearer test-token-not-real"
+    assert sent["url"].endswith(":8080/v1/chat/completions")

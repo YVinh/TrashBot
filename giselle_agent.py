@@ -76,19 +76,38 @@ Pas de hashtag, pas de mention @, pas de lien : ils sont ajoutés automatiquemen
 Maximum 180 caractères. Réponds UNIQUEMENT avec la réaction, sans guillemets ni explication."""
 
 
+# EXACT system prompt of the Giselle LoRA training set (homelab#111, experiments/giselle-writer/build_dataset.py).
+# The adapter was trained only with this prompt and the user format below; do not reword either.
+TRAINING_SYSTEM_PROMPT = (
+    "Tu es Giselle, moralisatrice et scandalisée par la saleté à Bruxelles. On te donne le post de Marc et parfois un "
+    "article. Écris UNE réaction en français, 180 caractères maximum, sans hashtag, sans @, sans lien.")
+
+
+def _training_user(marc_post_text: str, article: dict | None) -> str:
+    user = f"Post de Marc :\n{marc_post_text}\n\n"
+    if article:
+        return user + f"Article ({article['published']:%d/%m}) : {article['title']}\n{article['summary'][:400]}"
+    return user + "Pas d'article cette fois."
+
+
 def _local_reaction(marc_post_text: str) -> str:
     import local_llm
     import news_rss
 
     article = news_rss.pick_article()
-    user = f"Post de Marc :\n{marc_post_text}\n\n"
-    if article:
-        user += f"Article ({article['published']:%d/%m}) : {article['title']}\n{article['summary'][:400]}"
-    else:
-        user += "Pas d'article cette fois."
-    text = local_llm.chat(local_llm.writer_model(), [
-        {"role": "system", "content": LOCAL_SYSTEM_PROMPT}, {"role": "user", "content": user},
-    ], max_tokens=200, temperature=0.9)
+    user = _training_user(marc_post_text, article)
+    text = None
+    adapter = local_llm.housenode_adapter("giselle")
+    if adapter:  # phone first: stock Qwen3.5-4B + the Giselle LoRA, trained on exactly this prompt
+        try:
+            text = local_llm.housenode_chat(adapter, [
+                {"role": "system", "content": TRAINING_SYSTEM_PROMPT}, {"role": "user", "content": user}])
+        except local_llm.LocalLLMError:
+            text = None  # unchanged fallback below: the gateway writer model
+    if text is None:
+        text = local_llm.chat(local_llm.writer_model(), [
+            {"role": "system", "content": LOCAL_SYSTEM_PROMPT}, {"role": "user", "content": user},
+        ], max_tokens=200, temperature=0.9)
     text = text.strip().strip('"').strip("«»").strip()
     pool = HASHTAG_POOL.split()
     tags = random.sample(pool, min(random.choice([2, 3]), len(pool))) + [YOUSUF_HANDLE]
